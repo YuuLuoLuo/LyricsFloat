@@ -26,6 +26,12 @@ pub fn spawn(app: AppHandle, win: WebviewWindow) {
             // set_always_on_top / show 之后都会整份重写一次），就地摘掉。
             // 样式没变时这里只做两次 GetWindowLongW，开销可以忽略。
             effects::strip_caption(&win);
+            // 同理，tao 的整份重写也会把 WS_EX_TRANSPARENT | WS_EX_LAYERED 抹掉。
+            // 那两位是"静止态隐形 + 穿透点击"的全部实现 —— 启动即锁定时正好
+            // 撞上前端 show()，词板就显了形还挡点击；而 REVEALED 从头到尾都是
+            // false，等不到一次状态切换去补救。所以这里每拍对齐一次：
+            // 与目标状态一致时是两次 GetWindowLongW，不一致才写。
+            effects::set_click_through(&win, !REVEALED.load(Ordering::Relaxed));
 
             let locked = LOCKED.load(Ordering::Relaxed);
             let current = REVEALED.load(Ordering::Relaxed);
