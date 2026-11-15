@@ -92,6 +92,11 @@ export function setDragging(on: boolean) {
   return call('set_dragging', { on })
 }
 
+/** 让词板临时显形一会儿（调宽高时看清面板边界），连续调用会把截止时间往后推 */
+export function peekBoard(ms: number) {
+  return call('peek_board', { ms })
+}
+
 export function getAutostart() {
   return call<boolean>('get_autostart')
 }

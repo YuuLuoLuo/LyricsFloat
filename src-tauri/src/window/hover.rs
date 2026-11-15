@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
-use super::{effects, GLASS_COLOR, LOCKED, REVEALED};
+use super::{effects, now_ms, GLASS_COLOR, LOCKED, PEEK_UNTIL, REVEALED};
 
 /// 16ms ≈ 60Hz。鼠标穿透时 WebView 收不到 mousemove，只能读全局光标。
 const TICK_MS: u64 = 16;
@@ -31,6 +31,18 @@ pub fn spawn(app: AppHandle, win: WebviewWindow) {
                     REVEALED.store(false, Ordering::Relaxed);
                     reveal(&win, false);
                     let _ = app.emit("hover-changed", false);
+                }
+                continue;
+            }
+
+            // 设置页刚调过宽高，或者正在调：这段时间内保持显形，
+            // 让用户能看清面板的实际边界。过期后照常走悬停判断。
+            if PEEK_UNTIL.load(Ordering::Relaxed) > now_ms() {
+                leave_ticks = 0;
+                if !current {
+                    REVEALED.store(true, Ordering::Relaxed);
+                    reveal(&win, true);
+                    let _ = app.emit("hover-changed", true);
                 }
                 continue;
             }

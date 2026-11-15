@@ -1,7 +1,7 @@
 pub mod effects;
 mod hover;
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
@@ -11,6 +11,17 @@ pub(crate) static LOCKED: AtomicBool = AtomicBool::new(false);
 pub(crate) static REVEALED: AtomicBool = AtomicBool::new(false);
 /// 玻璃底色，AABBGGRR（SCA 要的是 ABGR 顺序）
 pub(crate) static GLASS_COLOR: AtomicU32 = AtomicU32::new(0x9E_1E1A1A);
+/// 临时显形的截止时刻（epoch ms）。设置页拖宽高时反复刷新，
+/// 悬停轮询看到还没过期就不收起 —— 调尺寸时能看清面板的边界。
+pub(crate) static PEEK_UNTIL: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn now_ms() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 pub fn is_locked() -> bool {
     LOCKED.load(Ordering::Relaxed)
@@ -194,5 +205,20 @@ pub fn set_dragging(app: AppHandle, on: bool) {
             reveal_on(&win);
             let _ = app.emit("hover-changed", true);
         }
+    }
+}
+
+/// 让词板临时显形 ms 毫秒（设置页调宽高时用，连续调用会把截止时间往后推）。
+/// 锁定状态下不显形：锁了就该彻底消失。
+#[tauri::command]
+pub fn peek_board(app: AppHandle, ms: u64) {
+    PEEK_UNTIL.store(now_ms() + ms.min(5000), Ordering::Relaxed);
+    if is_locked() {
+        return;
+    }
+    let Some(win) = board(&app) else { return };
+    if !REVEALED.swap(true, Ordering::Relaxed) {
+        reveal_on(&win);
+        let _ = app.emit("hover-changed", true);
     }
 }

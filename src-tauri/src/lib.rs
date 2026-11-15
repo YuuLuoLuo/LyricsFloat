@@ -19,6 +19,7 @@ pub fn run() {
             window::close_settings,
             window::quit_app,
             window::set_dragging,
+            window::peek_board,
             autostart::get_autostart,
             autostart::set_autostart,
             lyrics::fetch_lyric,

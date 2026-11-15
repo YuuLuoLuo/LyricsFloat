@@ -15,6 +15,7 @@ import {
   listFonts,
   minimizeSelf,
   onFileDrop,
+  peekBoard,
   quitApp,
   setAlwaysOnTop,
   setAutostart,
@@ -370,6 +371,21 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null
 watch(
   () => settings.lyric.offsetMs,
   () => reapplyOffset(),
+)
+
+/**
+ * 调宽高时让词板临时显形。
+ *
+ * 词板静止态是全透明的（只剩字），改尺寸的时候完全看不出面板边界，
+ * 只能等松手把鼠标移上去才知道改成了什么样。所以拖动滑块期间
+ * 让它按"悬停"的样子亮起来，停手 1.4 秒后自动收起。
+ */
+const PEEK_MS = 1400
+watch(
+  () => [settings.window.width, settings.window.height],
+  () => {
+    if (isTauri) void peekBoard(PEEK_MS)
+  },
 )
 
 watch(
