@@ -101,19 +101,18 @@ onBeforeUnmount(() => {
 })
 
 const stageDoc = computed(() => runtime.doc)
-const cardMode = computed(() => settings.view.mode === 'card')
 
-/* ------------------------------------------------------------ 卡片布局 */
+/* ------------------------------------------------------------ 歌词信息 */
 
 /**
- * 卡片模式的封面 / 标题位置都由设置决定：
- * 封面可以在左、在右或干脆不显示，标题可以在顶部、底部或不显示。
- * 两者都不显示时就退化成纯歌词，不再占那 46px。
+ * 「显示歌词信息」是独立开关：封面在左、在右或干脆不显示，
+ * 标题在顶部、底部或不显示。两者都不显示时就退化成纯歌词，不再占那 46px。
  */
-const cardCover = computed(() => settings.card.cover)
-const cardTitle = computed(() => settings.card.title)
+const infoOn = computed(() => settings.info.show)
+const cardCover = computed(() => settings.info.cover)
+const cardTitle = computed(() => settings.info.title)
 const cardHead = computed(
-  () => cardMode.value && (cardCover.value !== 'hidden' || cardTitle.value !== 'hidden'),
+  () => infoOn.value && (cardCover.value !== 'hidden' || cardTitle.value !== 'hidden'),
 )
 
 /** 标题挪到底部时，锁定按钮也换到右上角，别和底部那行标题/封面挤在一起 */
@@ -129,7 +128,7 @@ const lockOnTop = computed(() => cardHead.value && cardTitle.value === 'bottom')
   >
     <div class="glass" :style="glassStyle"></div>
 
-    <div class="content" :class="{ 'card-mode': cardMode }">
+    <div class="content" :class="{ 'card-mode': infoOn }">
       <div
         v-if="cardHead"
         class="card-head"

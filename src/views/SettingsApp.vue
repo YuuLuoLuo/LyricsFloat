@@ -7,8 +7,7 @@ import { clock } from '../core/clock'
 import { findLineIndex } from '../core/parser'
 import { initPlayer, reapplyOffset } from '../core/player'
 import { exportSettingsToDesktop, importSettingsFile, initSettingsFile, settingsFilePath } from '../core/persist'
-import type { LyricLine, StageMode } from '../core/types'
-import { MODE_LABELS } from '../core/types'
+import type { LyricLine } from '../core/types'
 import {
   closeSettingsWindow,
   getAutostart,
@@ -22,8 +21,6 @@ import {
   setLocked,
   startDragging,
 } from '../core/bridge'
-
-const MODES = Object.keys(MODE_LABELS) as StageMode[]
 
 /** 常用字体（只显示系统里确实装了的），其余靠搜索 */
 const CURATED = [
@@ -107,34 +104,28 @@ const previewGlass = computed(() => {
   return { background: `rgba(${rgb}, ${settings.glass.alpha})` }
 })
 
-const showTrans = computed(() => settings.view.showTranslation || settings.view.mode === 'bilingual')
+const showTrans = computed(() => settings.view.translation)
 
 /** 词板高度能放几行 —— 行数不再让用户手选，由高度和行距决定 */
 const capacity = computed(() => {
-  const head = settings.view.mode === 'card' ? 46 : 0
+  const head = settings.info.show ? 46 : 0
   const unit = Math.max(1, settings.appearance.lineHeight) * (showTrans.value ? 1.5 : 1)
   const usable = Math.max(0, settings.window.height - head)
-  return Math.max(2, Math.floor(usable / unit))
+  return Math.max(1, Math.floor(usable / unit))
 })
 
-/** 按展示形式决定哪些排版选项才有意义 */
-const show = computed(() => {
-  const m = settings.view.mode
-  return {
-    scale: m !== 'plain',
-    blur: m === 'scroll',
-    fade: m === 'scroll',
-    ktvColor: m === 'karaoke' || m === 'duet',
-    translation: m !== 'bilingual',
-    card: m === 'card',
-    // 指针模式的模糊/淡出是模式自带的，给滑块反而让人以为能调
-    pivot: m === 'pivot',
-  }
-})
+/** 按样式开关决定哪些排版选项才有意义 */
+const show = computed(() => ({
+  // 旋转样式自带的模糊/淡出是画法的一部分，给滑块反而让人以为能调
+  blur: !settings.view.rotate,
+  fade: !settings.view.rotate,
+  ktvColor: settings.view.karaoke,
+  card: settings.info.show,
+}))
 
 /**
- * 水平对齐的可选项。指针排布要拿一侧当圆心，没有"居中"这种画法，
- * 所以这个模式下只留左 / 右。
+ * 水平对齐的可选项。旋转样式要拿一侧当圆心，没有"居中"这种画法，
+ * 所以开着旋转时只留左 / 右。
  */
 const H_ALIGNS = computed(() => {
   const all = [
@@ -142,16 +133,13 @@ const H_ALIGNS = computed(() => {
     { k: 'center', label: '中' },
     { k: 'right', label: '右' },
   ] as const
-  return settings.view.mode === 'pivot'
-    ? all.filter((it) => it.k !== 'center')
-    : [...all]
+  return settings.view.rotate ? all.filter((it) => it.k !== 'center') : [...all]
 })
 
-function setMode(m: StageMode): void {
-  settings.view.mode = m
-  if (m === 'pivot' && settings.appearance.align === 'center') {
-    settings.appearance.align = 'left'
-  }
+/** 打开旋转时把居中的对齐收边 —— 居中没有圆心，画出来是绕中心扭 */
+function toggleRotate(v: boolean): void {
+  settings.view.rotate = v
+  if (v && settings.appearance.align === 'center') settings.appearance.align = 'left'
 }
 
 /* --------------------------------------------------------------- 行为 */
@@ -537,11 +525,6 @@ onBeforeUnmount(() => {
               />
               <span class="val">{{ settings.lyric.offsetMs }} ms</span>
             </div>
-            <label v-if="show.translation" class="switch">
-              <span>显示翻译</span>
-              <input v-model="settings.view.showTranslation" type="checkbox" />
-              <i></i>
-            </label>
 
             <h3>行为</h3>
             <label class="switch">
@@ -592,42 +575,58 @@ onBeforeUnmount(() => {
 
           <!-- ---------------------------------------------------- 外观 -->
           <section v-show="tab === 'look'">
-            <h3>展示形式</h3>
-            <div class="chips">
-              <button
-                v-for="m in MODES"
-                :key="m"
-                class="chip"
-                :class="{ on: settings.view.mode === m }"
-                @click="setMode(m)"
-              >
-                {{ MODE_LABELS[m] }}
-              </button>
-            </div>
-            <p v-if="settings.view.mode === 'pivot'" class="hint">
-              以对齐那一侧为圆心：居左绕左边、居右绕右边，上下句模糊并压在当前句下面。
+            <h3>歌词样式</h3>
+            <label class="switch">
+              <span>歌词旋转</span>
+              <input
+                type="checkbox"
+                :checked="settings.view.rotate"
+                @change="toggleRotate(($event.target as HTMLInputElement).checked)"
+              />
+              <i></i>
+            </label>
+            <label class="switch">
+              <span>歌词翻译</span>
+              <input v-model="settings.view.translation" type="checkbox" />
+              <i></i>
+            </label>
+            <label class="switch">
+              <span>逐字高亮</span>
+              <input v-model="settings.view.karaoke" type="checkbox" />
+              <i></i>
+            </label>
+            <label class="switch">
+              <span>显示歌词信息</span>
+              <input v-model="settings.info.show" type="checkbox" />
+              <i></i>
+            </label>
+            <p class="hint">
+              <template v-if="settings.view.rotate">
+                以对齐那一侧为圆心旋转：居左绕左边、居右绕右边，上下句模糊后压在当前句下面。
+              </template>
+              <template v-else>几种样式可以同时开启。高度压到只剩一句，就是单行显示。</template>
             </p>
 
             <template v-if="show.card">
-              <h3>卡片布局</h3>
+              <h3>歌词信息布局</h3>
               <div class="row">
                 <span class="lbl">封面</span>
                 <div class="seg grow">
                   <button
-                    :class="{ on: settings.card.cover === 'left' }"
-                    @click="settings.card.cover = 'left'"
+                    :class="{ on: settings.info.cover === 'left' }"
+                    @click="settings.info.cover = 'left'"
                   >
                     左侧
                   </button>
                   <button
-                    :class="{ on: settings.card.cover === 'right' }"
-                    @click="settings.card.cover = 'right'"
+                    :class="{ on: settings.info.cover === 'right' }"
+                    @click="settings.info.cover = 'right'"
                   >
                     右侧
                   </button>
                   <button
-                    :class="{ on: settings.card.cover === 'hidden' }"
-                    @click="settings.card.cover = 'hidden'"
+                    :class="{ on: settings.info.cover === 'hidden' }"
+                    @click="settings.info.cover = 'hidden'"
                   >
                     不显示
                   </button>
@@ -638,20 +637,20 @@ onBeforeUnmount(() => {
                 <span class="lbl">标题</span>
                 <div class="seg grow">
                   <button
-                    :class="{ on: settings.card.title === 'top' }"
-                    @click="settings.card.title = 'top'"
+                    :class="{ on: settings.info.title === 'top' }"
+                    @click="settings.info.title = 'top'"
                   >
                     顶部
                   </button>
                   <button
-                    :class="{ on: settings.card.title === 'bottom' }"
-                    @click="settings.card.title = 'bottom'"
+                    :class="{ on: settings.info.title === 'bottom' }"
+                    @click="settings.info.title = 'bottom'"
                   >
                     底部
                   </button>
                   <button
-                    :class="{ on: settings.card.title === 'hidden' }"
-                    @click="settings.card.title = 'hidden'"
+                    :class="{ on: settings.info.title === 'hidden' }"
+                    @click="settings.info.title = 'hidden'"
                   >
                     不显示
                   </button>
@@ -856,9 +855,9 @@ onBeforeUnmount(() => {
               <span class="val"></span>
             </div>
 
-            <template v-if="show.scale || show.blur || show.fade">
+            <template v-if="show.blur || show.fade">
               <h3>动效</h3>
-              <div v-if="show.scale" class="row">
+              <div class="row">
                 <span class="lbl">当前行放大</span>
                 <input
                   v-model.number="settings.appearance.currentScale"
@@ -1220,38 +1219,6 @@ section > h3:first-child {
   background: #dcdcd8;
   cursor: pointer;
   border: none;
-}
-
-/* 展示形式：留出呼吸感，别挤成一坨 */
-.chips {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin-bottom: 6px;
-}
-
-.chip {
-  height: 34px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.045);
-  color: rgba(255, 255, 255, 0.68);
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: all 130ms ease;
-}
-
-.chip:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-}
-
-.chip.on {
-  background: rgba(127, 212, 255, 0.16);
-  border-color: rgba(127, 212, 255, 0.48);
-  color: #a6e3ff;
 }
 
 .seg {

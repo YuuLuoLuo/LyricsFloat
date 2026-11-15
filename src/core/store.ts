@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import type { LyricDoc, StageMode } from './types'
+import type { LyricDoc } from './types'
 
 export interface AppSettings {
   window: {
@@ -30,9 +30,17 @@ export interface AppSettings {
     colorOther: string
     colorHighlight: string
   }
+  /**
+   * 歌词样式：四个开关互相独立，可以任意组合。
+   * 多行滚动是所有样式的地基，不再作为可选项。
+   */
   view: {
-    mode: StageMode
-    showTranslation: boolean
+    /** 歌词旋转：以对齐那一侧为圆心，上下句模糊后叠在当前句下面 */
+    rotate: boolean
+    /** 歌词翻译：每句下面挂一行译文 */
+    translation: boolean
+    /** 逐字高亮：拿到逐字时间轴时按字点亮 */
+    karaoke: boolean
   }
   glass: {
     tint: string
@@ -43,7 +51,9 @@ export interface AppSettings {
     alwaysOnTop: boolean
     locked: boolean
   }
-  card: {
+  /** 歌词信息：词板上的曲名与封面 */
+  info: {
+    show: boolean
     /** 封面位置：左右两侧，或干脆不显示 */
     cover: 'left' | 'right' | 'hidden'
     /** 标题位置：词板顶部 / 底部，或不显示（纯歌词） */
@@ -76,14 +86,41 @@ export const DEFAULTS: AppSettings = {
     colorOther: '#c9c9c4',
     colorHighlight: '#7fd4ff',
   },
-  view: { mode: 'scroll', showTranslation: false },
+  view: { rotate: false, translation: false, karaoke: false },
   glass: { tint: '#14141a', alpha: 0.42 },
   behavior: { autostart: false, alwaysOnTop: true, locked: false },
-  card: { cover: 'left', title: 'top' },
+  info: { show: false, cover: 'left', title: 'top' },
   lyric: { offsetMs: 0 },
 }
 
 const KEY = 'lyricboard.settings.v3'
+
+/**
+ * 老版本用 `view.mode` 一个枚举选样式，现在拆成四个独立开关。
+ * 读到旧结构就按原来的语义映射过来，存量配置不至于白丢：
+ * 指针排布 -> 旋转，双语原文 -> 翻译，逐字 KTV / 双行卡农 -> 逐字高亮，
+ * 卡片模式 -> 歌词信息。单行聚焦与纯文本是删掉的形式，退回默认（全关）。
+ */
+function migrate(raw: Record<string, unknown>): Record<string, unknown> {
+  const view = raw.view as Record<string, unknown> | undefined
+  if (!view || typeof view.mode !== 'string') return raw
+
+  const mode = view.mode
+  const card = (raw.card ?? {}) as Record<string, unknown>
+
+  view.rotate = mode === 'pivot'
+  view.translation = mode === 'bilingual' || view.showTranslation === true
+  view.karaoke = mode === 'karaoke' || mode === 'duet'
+  raw.info = {
+    show: mode === 'card',
+    cover: card.cover ?? 'left',
+    title: card.title ?? 'top',
+  }
+  delete view.mode
+  delete view.showTranslation
+  delete raw.card
+  return raw
+}
 
 /**
  * 按默认值的形状重建一份设置：
@@ -104,6 +141,12 @@ function prune(base: unknown, val: unknown): unknown {
   return out
 }
 
+/** 外部来的设置（存盘 / 导入）统一走：迁移 -> 按形状重建 -> 收敛旧数值 */
+function adopt(raw: unknown): AppSettings {
+  const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  return tame(prune(DEFAULTS, migrate(obj)) as AppSettings)
+}
+
 /**
  * 旧版本的默认值会把邻居行模糊/淡出到看不见（旧公式第三行只剩 0.04 不透明度）。
  * 存量设置里存着这些数值，光改 DEFAULTS 追不回来，读盘时统一收一下。
@@ -113,9 +156,9 @@ function tame(s: AppSettings): AppSettings {
   a.blurStep = Math.max(0, Math.min(a.blurStep, 1.5))
   a.blurMax = Math.max(0, Math.min(a.blurMax, 2.5))
   a.fadeStep = Math.max(0.02, Math.min(a.fadeStep, 0.2))
-  // 指针排布没有"居中"这种画法：圆心必须落在某一侧，
-  // 存量的 pivot + center（老版本允许）统一收到左边。
-  if (s.view.mode === 'pivot' && a.align === 'center') a.align = 'left'
+  // 旋转样式没有"居中"这种画法：圆心必须落在某一侧，
+  // 存量的 center（老版本允许）统一收到左边。
+  if (s.view.rotate && a.align === 'center') a.align = 'left'
   return s
 }
 
@@ -123,7 +166,7 @@ function load(): AppSettings {
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return JSON.parse(JSON.stringify(DEFAULTS))
-    return tame(prune(DEFAULTS, JSON.parse(raw)) as AppSettings)
+    return adopt(JSON.parse(raw))
   } catch {
     return JSON.parse(JSON.stringify(DEFAULTS))
   }
@@ -147,7 +190,7 @@ export function setFileWriter(fn: ((json: string) => void) | null): void {
 /** 把外部设置（导入的备份 / 磁盘上的文件）合并进来，缺失字段用默认值补齐 */
 export function adoptSettings(raw: unknown): boolean {
   if (!raw || typeof raw !== 'object') return false
-  Object.assign(settings, tame(prune(DEFAULTS, raw) as AppSettings))
+  Object.assign(settings, adopt(raw))
   saveSettings()
   return true
 }
@@ -187,7 +230,7 @@ export function pullSettings(): void {
     const raw = localStorage.getItem(KEY)
     if (!raw || raw === lastSerialized) return
     lastSerialized = raw
-    Object.assign(settings, tame(prune(DEFAULTS, JSON.parse(raw)) as AppSettings))
+    Object.assign(settings, adopt(JSON.parse(raw)))
   } catch {
     /* ignore */
   }

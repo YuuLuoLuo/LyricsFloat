@@ -14,8 +14,11 @@ const props = withDefaults(
   { height: 0 },
 )
 
-const mode = computed(() => settings.view.mode)
 const a = computed(() => settings.appearance)
+/** 四个样式开关，互相独立 */
+const rotateOn = computed(() => settings.view.rotate)
+const showTrans = computed(() => settings.view.translation)
+const karaokeOn = computed(() => settings.view.karaoke)
 
 /** 左右内边距（.line-inner 的 padding），算可用宽度时要扣掉 */
 const H_PAD = 26
@@ -131,55 +134,36 @@ watch(
   { immediate: true },
 )
 
-const showTrans = computed(() => settings.view.showTranslation || mode.value === 'bilingual')
-const karaokeOn = computed(() => mode.value === 'karaoke' || mode.value === 'duet')
-
 /**
  * 单行占位高度。
  *
- * 双语 / 开翻译时每一行下面还挂着一行译文，按纯歌词的行距排会挤在一起，
- * 所以这里把行高放大一档。
+ * 开翻译时每一行下面还挂着译文，按纯歌词的行距排会挤在一起，放大一档。
+ * 旋转样式刻意压紧行距：上下句要"叠"在当前句下面才像指针扫过；
+ * 此时若还开着翻译，每一格都是「原文 + 译文」两块，压太紧会互相盖住，
+ * 所以收缩幅度比纯歌词小一点。
  */
 const unitH = computed(() => {
   const lh = Math.max(1, a.value.lineHeight)
   const trans = showTrans.value ? 1.5 : 1
-  // 指针排布刻意压紧行距：上下句要"叠"在当前句下面才像指针扫过
-  const tight = mode.value === 'pivot' ? 0.78 : 1
+  const tight = rotateOn.value ? (showTrans.value ? 0.86 : 0.78) : 1
   return lh * trans * tight
 })
 
 /**
- * 行数完全由高度决定：能塞几行就显示几行，最少 2 行。
- * 用户调词板高度就是在调"看得见几句"，不需要再单独选行数。
+ * 行数完全由高度决定：能塞几行就显示几行。
+ * 用户调词板高度就是在调"看得见几句" —— 高度压到只放得下一句，
+ * 就是旧版的「单行聚焦」，不需要再单独选行数。
  */
 const capacity = computed(() => {
   const u = Math.max(1, unitH.value)
-  return Math.max(2, Math.floor(stageHeight.value / u))
-})
-
-/** 各形式自己决定的可见行数（双语与多行滚动一致：铺满可用高度） */
-const winSize = computed(() => {
-  switch (mode.value) {
-    case 'focus':
-    case 'karaoke':
-      return 1
-    case 'duet':
-      return 2
-    default:
-      // 多行滚动 / 双语 / 指针排布都铺满可用高度
-      return capacity.value
-  }
+  return Math.max(1, Math.floor(stageHeight.value / u))
 })
 
 /**
  * 单行实际占位。高度不够时按实际空间压缩行距 ——
  * 宁可挤一点，也不要让上下两边各切掉半行。
  */
-const rowH = computed(() => {
-  const u = Math.max(1, unitH.value)
-  const n = Math.max(1, winSize.value)
-  return Math.min(u, Math.max(0, stageHeight.value) / n)
-})
+const rowH = computed(() => Math.min(unitH.value, stageHeight.value / capacity.value))
 
 /**
  * 可见区间：以当前句为锚点。
@@ -193,16 +177,6 @@ const rowH = computed(() => {
 const range = computed(() => {
   const total = props.lines.length
   const i = cur.value
-  const m = mode.value
-  const clamped = Math.min(Math.max(i, 0), Math.max(0, total - 1))
-
-  if (m === 'focus' || m === 'karaoke') {
-    return { start: clamped, end: Math.min(total, clamped + 1) }
-  }
-  if (m === 'duet') {
-    return { start: clamped, end: Math.min(total, clamped + 2) }
-  }
-
   const per = Math.max(1, rowH.value)
   const down = Math.ceil(stageHeight.value / per) + 1
   const up =
@@ -238,7 +212,7 @@ interface Look {
   blur: number
   opacity: number
   visible: boolean
-  /** 绕对齐边旋转的角度（只用于指针排布） */
+  /** 绕对齐边旋转的角度（只用于旋转样式） */
   rotate: number
   /** 层叠顺序：当前句要压在上下句之上 */
   z: number
@@ -253,60 +227,31 @@ function rowLook(index: number): Look {
   let scale = 1
   let blur = 0
   let opacity = 1
-  let visible = true
   let rotate = 0
   let z = 0
 
-  switch (mode.value) {
-    case 'focus':
-      // 只有一句可见。没有当前句（前奏/尾奏）时，把最近的那句暗着放出来，
-      // 全程空白太像程序没在跑。
-      visible = ad === 0 || (!hasCur.value && ad === 1)
-      scale = ad === 0 ? cfg.currentScale : 0.9
-      opacity = ad === 0 ? 1 : 0.45
-      break
-    case 'karaoke':
-      visible = ad <= 1
-      scale = ad === 0 ? cfg.currentScale : 0.86
-      blur = ad === 0 ? 0 : 2
-      opacity = ad === 0 ? 1 : 0.32
-      break
-    case 'duet':
-      visible = (d >= 0 && d <= 1) || (!hasCur.value && ad === 1)
-      scale = d === 0 ? cfg.currentScale : 0.92
-      blur = d === 0 ? 0 : 0.3
-      opacity = d === 0 ? 1 : 0.6
-      break
-    case 'pivot': {
-      // 指针式：以「对齐边」（看左边或看右边）为圆心，
-      // 越远的句子转得越多、糊得越深，并整个叠在当前句下面。
-      //
-      // 旋转方向必须镜像：右锚点时若是同号，下方的句子会绕着右边
-      // 往上甩，看上去像是绕左边转 —— 也就是"锚点在左不在右"。
-      const ANGLE = 3
-      const dir = cfg.align === 'right' ? -1 : 1
-      rotate = d * ANGLE * dir
-      scale = ad === 0 ? cfg.currentScale : Math.max(0.62, 0.95 - ad * 0.06)
-      // 模糊只求"退到后面去"，别糊成一团反而盖住当前句
-      blur = ad === 0 ? 0 : Math.min(6, 1.2 + ad * 1)
-      opacity = ad === 0 ? 1 : Math.max(0.12, 0.52 - ad * 0.1)
-      z = Math.max(1, 5 - ad)
-      break
-    }
-    case 'plain':
-      scale = 1
-      blur = 0
-      opacity = 0.92
-      break
-    default: {
-      scale = ad === 0 ? cfg.currentScale : Math.max(0.72, 1 - ad * 0.05)
-      blur = ad === 0 ? 0 : Math.min(cfg.blurMax, ad * cfg.blurStep)
-      // 以前这里是 1 - ad*fadeStep*2，第三行就淡到 0.04，等于看不见。
-      // 现在只按一侧衰减，并留一个下限：远处的句子要"退后"，但必须还能读。
-      opacity = ad === 0 ? 1 : Math.max(0.22, 1 - ad * cfg.fadeStep)
-    }
+  if (rotateOn.value) {
+    // 指针式：以「对齐边」（看左边或看右边）为圆心，
+    // 越远的句子转得越多、糊得越深，并整个叠在当前句下面。
+    //
+    // 旋转方向必须镜像：右锚点时若是同号，下方的句子会绕着右边
+    // 往上甩，看上去像是绕左边转 —— 也就是"锚点在左不在右"。
+    const ANGLE = 3
+    const dir = cfg.align === 'right' ? -1 : 1
+    rotate = d * ANGLE * dir
+    scale = ad === 0 ? cfg.currentScale : Math.max(0.62, 0.95 - ad * 0.06)
+    // 模糊只求"退到后面去"，别糊成一团反而盖住当前句
+    blur = ad === 0 ? 0 : Math.min(6, 1.2 + ad * 1)
+    opacity = ad === 0 ? 1 : Math.max(0.12, 0.52 - ad * 0.1)
+    z = Math.max(1, 5 - ad)
+  } else {
+    scale = ad === 0 ? cfg.currentScale : Math.max(0.72, 1 - ad * 0.05)
+    blur = ad === 0 ? 0 : Math.min(cfg.blurMax, ad * cfg.blurStep)
+    // 以前这里是 1 - ad*fadeStep*2，第三行就淡到 0.04，等于看不见。
+    // 现在只按一侧衰减，并留一个下限：远处的句子要"退后"，但必须还能读。
+    opacity = ad === 0 ? 1 : Math.max(0.22, 1 - ad * cfg.fadeStep)
   }
-  return { scale, blur, opacity, visible, rotate, z }
+  return { scale, blur, opacity, visible: true, rotate, z }
 }
 
 /**
@@ -497,7 +442,7 @@ function displayText(line: LyricLine): string {
         v-for="row in rows"
         :key="row.index"
         class="line"
-        :class="{ 'is-current': hasCur && row.index === cur, [`m-${mode}`]: true }"
+        :class="{ 'is-current': hasCur && row.index === cur }"
         :style="lineStyle(row.index)"
       >
         <div class="line-inner" :style="{ textAlign: a.align }">
@@ -513,15 +458,7 @@ function displayText(line: LyricLine): string {
             </template>
             <template v-else>{{ displayText(row.line) }}</template>
           </div>
-          <div
-            v-if="
-              showTrans &&
-              row.line.trans &&
-              ((hasCur && row.index === cur) || mode === 'bilingual')
-            "
-            class="trans"
-            :style="transStyle(row.index)"
-          >
+          <div v-if="showTrans && row.line.trans" class="trans" :style="transStyle(row.index)">
             {{ row.line.trans }}
           </div>
         </div>
@@ -600,9 +537,5 @@ function displayText(line: LyricLine): string {
 .w.active {
   color: var(--hl, #7fd4ff);
   opacity: 1;
-}
-
-.m-plain .line {
-  transition: none;
 }
 </style>
