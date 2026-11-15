@@ -1,3 +1,4 @@
+mod about;
 mod autostart;
 mod fonts;
 mod lyrics;
@@ -20,6 +21,9 @@ pub fn run() {
             window::quit_app,
             window::set_dragging,
             window::peek_board,
+            about::app_version,
+            about::open_url,
+            about::check_update,
             autostart::get_autostart,
             autostart::set_autostart,
             lyrics::fetch_lyric,

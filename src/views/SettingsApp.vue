@@ -7,14 +7,18 @@ import { clock } from '../core/clock'
 import { findLineIndex } from '../core/parser'
 import { initPlayer, reapplyOffset } from '../core/player'
 import { exportSettingsToDesktop, importSettingsFile, initSettingsFile, settingsFilePath } from '../core/persist'
+import { ABOUT } from '../core/about'
 import type { LyricLine } from '../core/types'
 import {
+  appVersion,
+  checkUpdate,
   closeSettingsWindow,
   getAutostart,
   isTauri,
   listFonts,
   minimizeSelf,
   onFileDrop,
+  openUrl,
   peekBoard,
   quitApp,
   setAlwaysOnTop,
@@ -46,6 +50,7 @@ const fonts = ref<string[]>([...CURATED])
 const TABS = [
   { id: 'general', label: '常规' },
   { id: 'look', label: '外观' },
+  { id: 'about', label: '关于' },
 ] as const
 
 const tab = ref<(typeof TABS)[number]['id']>('general')
@@ -363,6 +368,53 @@ async function doImport(file: string): Promise<void> {
 
 let offDrop: (() => void) | null = null
 
+/* --------------------------------------------------------------- 关于 */
+
+const version = ref('')
+const repoUrl = computed(() => (ABOUT.repo ? `https://github.com/${ABOUT.repo}` : ''))
+
+interface UpdateState {
+  kind: 'idle' | 'latest' | 'new' | 'error'
+  text: string
+  url?: string
+  notes?: string
+}
+
+const updateState = ref<UpdateState>({ kind: 'idle', text: '' })
+const checking = ref(false)
+
+async function doCheckUpdate(): Promise<void> {
+  if (!ABOUT.repo) {
+    say('仓库发布后才能检查更新')
+    return
+  }
+  if (checking.value) return
+  checking.value = true
+  updateState.value = { kind: 'idle', text: '正在检查…' }
+
+  const { info, error } = await checkUpdate(ABOUT.repo)
+  checking.value = false
+
+  if (error || !info) {
+    updateState.value = { kind: 'error', text: error || '没有读到版本信息' }
+    return
+  }
+  updateState.value = info.newer
+    ? {
+        kind: 'new',
+        text: `发现新版本 ${info.latest}${info.published ? ` · ${info.published}` : ''}`,
+        url: info.url,
+        notes: info.notes,
+      }
+    : { kind: 'latest', text: `已是最新版本（${info.latest}）` }
+}
+
+async function openLink(url: string): Promise<void> {
+  if (!url) return
+  if (isTauri) await openUrl(url)
+  else window.open(url, '_blank')
+}
+
 /* --------------------------------------------------------------- 持久化 */
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -406,6 +458,7 @@ onMounted(async () => {
   if (isTauri) {
     const v = await getAutostart()
     if (typeof v === 'boolean') autostart.value = v
+    version.value = (await appVersion()) || ''
   } else {
     autostart.value = settings.behavior.autostart
   }
@@ -933,6 +986,55 @@ onBeforeUnmount(() => {
               <span class="val"></span>
             </div>
           </section>
+
+          <!-- ---------------------------------------------------- 关于 -->
+          <section v-show="tab === 'about'">
+            <div class="about-head">
+              <img src="/icon.svg" alt="" class="about-logo" />
+              <div class="about-title">
+                <div class="about-name">
+                  歌词板
+                  <span class="about-ver">{{ version ? `v${version}` : '—' }}</span>
+                </div>
+                <div class="about-desc">{{ ABOUT.tagline }}</div>
+              </div>
+            </div>
+
+            <h3>版本</h3>
+            <div class="row">
+              <span class="lbl">当前版本</span>
+              <div class="grow muted mono">{{ version || '—' }}</div>
+              <button class="mini" :disabled="checking || !repoUrl" @click="doCheckUpdate">
+                {{ checking ? '检查中…' : '检查更新' }}
+              </button>
+            </div>
+            <p v-if="updateState.text" class="hint" :class="`up-${updateState.kind}`">
+              {{ updateState.text }}
+            </p>
+            <div v-if="updateState.url" class="update-actions">
+              <button class="ghost" @click="openLink(updateState.url)">打开发布页</button>
+            </div>
+            <pre v-if="updateState.notes" class="notes">{{ updateState.notes }}</pre>
+            <p v-if="!repoUrl" class="hint">仓库还没发布，暂时无法检查更新。</p>
+
+            <h3>项目</h3>
+            <div class="row">
+              <span class="lbl">仓库</span>
+              <div class="grow muted mono" :title="repoUrl">{{ repoUrl || '待发布' }}</div>
+              <button v-if="repoUrl" class="mini" @click="openLink(repoUrl)">打开</button>
+            </div>
+            <div class="row">
+              <span class="lbl">作者</span>
+              <div class="grow muted">{{ ABOUT.author }}</div>
+            </div>
+
+            <h3>使用与数据</h3>
+            <p class="hint">
+              鼠标移到词板上才会显形，此时可以拖动或右键；锁定后点击直接穿过去。
+              歌词取自公开歌词库，找不到时词板会写明原因。
+            </p>
+            <p class="hint">设置只存在本机，不收集也不上传任何使用数据。</p>
+          </section>
         </div>
       </div>
     </div>
@@ -1206,6 +1308,86 @@ section > h3:first-child {
 .mini:hover {
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
+}
+
+.mini:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ------------------------------------------------------------- 关于页 */
+
+.about-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 10px 0 4px;
+}
+
+.about-logo {
+  width: 44px;
+  height: 44px;
+  flex: none;
+}
+
+.about-title {
+  min-width: 0;
+}
+
+.about-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  letter-spacing: 0.02em;
+}
+
+.about-ver {
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.36);
+  font-variant-numeric: tabular-nums;
+}
+
+.about-desc {
+  margin-top: 4px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+/* 检查结果要能一眼分出"有新版本"和"检查失败" */
+.hint.up-new {
+  color: #9fe3b4;
+}
+
+.hint.up-error {
+  color: #ff9d9d;
+}
+
+.update-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* Release 说明是纯文本（还带换行），别按 HTML 渲染 */
+.notes {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  max-height: 148px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  font-family: inherit;
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.6);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .val {

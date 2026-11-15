@@ -149,6 +149,38 @@ export async function onFileDrop(cb: (paths: string[]) => void): Promise<() => v
   }
 }
 
+/* ------------------------------------------------------------- 关于页 */
+
+export function appVersion() {
+  return call<string>('app_version')
+}
+
+/** 交给系统默认浏览器打开（只放行 http(s)） */
+export function openUrl(url: string) {
+  return call('open_url', { url })
+}
+
+export interface UpdateInfo {
+  current: string
+  latest: string
+  url: string
+  notes: string
+  published: string
+  newer: boolean
+}
+
+/** 读 GitHub 最新 Release。失败时 command 会 reject，这里统一返回 null 由调用方提示 */
+export async function checkUpdate(repo: string): Promise<{ info?: UpdateInfo; error?: string }> {
+  if (!isTauri) return { error: '仅桌面版支持检查更新' }
+  try {
+    const mod = await import('@tauri-apps/api/core')
+    const info = await mod.invoke<UpdateInfo>('check_update', { repo })
+    return { info }
+  } catch (err) {
+    return { error: typeof err === 'string' ? err : '检查更新失败' }
+  }
+}
+
 /* --------------------------------------------------------------- 窗口 */
 
 export async function currentLabel(): Promise<string> {
