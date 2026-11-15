@@ -1,0 +1,46 @@
+/* 透明窗口的根：任何一层带不透明底色，整块就会变成白底或灰底 */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  overflow: hidden;
+  font-family: 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: #fff;
+  cursor: default;
+  user-select: none;
+}
+
+/* 浏览器预览时才有"桌面"，Tauri 下壁纸由系统提供 */
+body.win-settings {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+button {
+  font-family: inherit;
+}
+
+button:focus-visible {
+  outline: 2px solid rgba(127, 212, 255, 0.7);
+  outline-offset: 1px;
+}
+
+input,
+select {
+  font-family: inherit;
+}
+

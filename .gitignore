@@ -1,0 +1,28 @@
+# 依赖与构建产物
+node_modules/
+dist/
+release/
+*.local
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+src-tauri/WixTools/
+
+# 打包中间文件
+.nsis/
+.nsis.zip
+.nsis_utils.dll
+
+# 本地备份（exe 与源码包，体积大，不入库）
+backups/
+
+# 调试临时文件
+*.log
+run.log
+.crop-*.png
+.crop.py
+
+# 系统
+.DS_Store
+Thumbs.db

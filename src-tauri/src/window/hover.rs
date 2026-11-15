@@ -1,0 +1,115 @@
+use std::sync::atomic::Ordering;
+use std::thread;
+use std::time::Duration;
+
+use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
+
+use super::{effects, GLASS_COLOR, LOCKED, REVEALED};
+
+/// 16ms ≈ 60Hz。鼠标穿透时 WebView 收不到 mousemove，只能读全局光标。
+const TICK_MS: u64 = 16;
+/// 离开后延迟收起，避免边缘抖动
+const LEAVE_DELAY_MS: u64 = 320;
+/// 进入判定外扩：更容易触发
+const PAD_IN: i32 = 4;
+/// 离开判定内收：防止刚滑到边上就消失
+const PAD_OUT: i32 = 36;
+
+pub fn spawn(app: AppHandle, win: WebviewWindow) {
+    thread::spawn(move || {
+        let mut leave_ticks: u64 = 0;
+
+        loop {
+            thread::sleep(Duration::from_millis(TICK_MS));
+
+            let locked = LOCKED.load(Ordering::Relaxed);
+            let current = REVEALED.load(Ordering::Relaxed);
+
+            if locked {
+                leave_ticks = 0;
+                if current {
+                    REVEALED.store(false, Ordering::Relaxed);
+                    reveal(&win, false);
+                    let _ = app.emit("hover-changed", false);
+                }
+                continue;
+            }
+
+            if cursor_over(&app, &win, current) {
+                leave_ticks = 0;
+                if !current {
+                    REVEALED.store(true, Ordering::Relaxed);
+                    reveal(&win, true);
+                    let _ = app.emit("hover-changed", true);
+                }
+            } else if current {
+                leave_ticks += 1;
+                if leave_ticks * TICK_MS >= LEAVE_DELAY_MS {
+                    leave_ticks = 0;
+                    REVEALED.store(false, Ordering::Relaxed);
+                    reveal(&win, false);
+                    let _ = app.emit("hover-changed", false);
+                }
+            } else {
+                leave_ticks = 0;
+            }
+        }
+    });
+}
+
+fn reveal(win: &WebviewWindow, on: bool) {
+    if on {
+        effects::enable_glass(win, GLASS_COLOR.load(Ordering::Relaxed));
+        let _ = win.set_ignore_cursor_events(false);
+    } else {
+        effects::disable_glass(win);
+        let _ = win.set_ignore_cursor_events(true);
+    }
+}
+
+#[cfg(windows)]
+pub fn cursor_over(app: &AppHandle, win: &WebviewWindow, current: bool) -> bool {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    let Ok(pos) = win.outer_position() else {
+        return false;
+    };
+    let Ok(size) = win.outer_size() else {
+        return false;
+    };
+
+    let mut pt = POINT::default();
+    if unsafe { GetCursorPos(&mut pt) }.is_err() {
+        return false;
+    }
+
+    // 光标在设置窗口上时不算"悬停词板"：设置页是普通窗口、压在最上层，
+    // 如果它和词板有重叠，光标必然同时落在两块矩形里，必须先判它。
+    if let Some(settings) = app.get_webview_window("settings") {
+        if settings.is_visible().unwrap_or(false) {
+            if let (Ok(sp), Ok(ss)) = (settings.outer_position(), settings.outer_size()) {
+                if pt.x >= sp.x
+                    && pt.x <= sp.x + ss.width as i32
+                    && pt.y >= sp.y
+                    && pt.y <= sp.y + ss.height as i32
+                {
+                    return false;
+                }
+            }
+        }
+    }
+
+    let pad = if current { PAD_OUT } else { PAD_IN };
+    let left = pos.x - pad;
+    let top = pos.y - pad;
+    let right = pos.x + size.width as i32 + pad;
+    let bottom = pos.y + size.height as i32 + pad;
+
+    pt.x >= left && pt.x <= right && pt.y >= top && pt.y <= bottom
+}
+
+#[cfg(not(windows))]
+pub fn cursor_over(_app: &AppHandle, _win: &WebviewWindow, _current: bool) -> bool {
+    false
+}
