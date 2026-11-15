@@ -306,7 +306,7 @@ async function onTitleDown(e: PointerEvent) {
   if (e.button !== 0) return
   const el = e.target as HTMLElement
   if (el.closest('button')) return
-  await startDragging()
+  await startDragging(e)
 }
 
 /* --------------------------------------------------------- 配置导入导出 */

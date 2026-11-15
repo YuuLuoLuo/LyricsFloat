@@ -195,14 +195,53 @@ export async function currentLabel(): Promise<string> {
   }
 }
 
-export async function startDragging(): Promise<void> {
+/**
+ * 拖动窗口（词板 / 设置窗共用）。
+ *
+ * 刻意不用 tauri 的 startDragging：它底层是
+ * `SendMessage(WM_NCLBUTTONDOWN, HTCAPTION)` 冒充"按住标题栏拖动"，
+ * DWM 会画出一条标题栏帧并残留在屏幕上（点一下词板就冒出一条，
+ * 要等下次 resize 才消失）。改成自己跟 pointermove 挪窗口，不碰非客户区。
+ */
+export async function startDragging(e?: PointerEvent): Promise<void> {
   if (!isTauri) return
+  if (!e) return
+  const target = e.currentTarget as HTMLElement | null
   try {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window')
-    await getCurrentWindow().startDragging()
-  } catch (err) {
-    console.warn('[bridge] startDragging failed', err)
+    target?.setPointerCapture(e.pointerId)
+  } catch {
+    /* 某些环境不支持指针捕获，窗口跟手会差一点，但不影响 */
   }
+  const startX = e.screenX
+  const startY = e.screenY
+  let winX = 0
+  let winY = 0
+  const pos = await call<[number, number]>('window_logical_pos')
+  if (!pos) return
+  winX = pos[0]
+  winY = pos[1]
+  void call('set_dragging', { on: true })
+
+  const onMove = (ev: PointerEvent) => {
+    void call('move_window_logical', {
+      x: winX + ev.screenX - startX,
+      y: winY + ev.screenY - startY,
+    })
+  }
+  const finish = () => {
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', finish)
+    window.removeEventListener('pointercancel', finish)
+    try {
+      target?.releasePointerCapture(e.pointerId)
+    } catch {
+      /* ignore */
+    }
+    void call('set_dragging', { on: false })
+  }
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', finish)
+  window.addEventListener('pointercancel', finish)
 }
 
 export async function showSelf(): Promise<void> {

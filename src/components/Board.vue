@@ -54,7 +54,7 @@ async function onPointerDown(e: PointerEvent) {
   if (el.closest('button, .ctx')) return
   // 未显形时窗口是穿透的，也不该拖动
   if (!revealed.value) return
-  await startDragging()
+  await startDragging(e)
 }
 
 /* --------------------------------------------------------- 右键菜单 */

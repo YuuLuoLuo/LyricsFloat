@@ -20,6 +20,8 @@ pub fn run() {
             window::close_settings,
             window::quit_app,
             window::set_dragging,
+            window::window_logical_pos,
+            window::move_window_logical,
             window::peek_board,
             about::app_version,
             about::open_url,

@@ -220,6 +220,29 @@ pub fn set_dragging(app: AppHandle, on: bool) {
     }
 }
 
+/// 窗口当前位置（逻辑坐标），手动拖动的起点
+#[tauri::command]
+pub fn window_logical_pos(win: WebviewWindow) -> (f64, f64) {
+    let scale = win.scale_factor().unwrap_or(1.0).max(0.01);
+    match win.outer_position() {
+        Ok(p) => (p.x as f64 / scale, p.y as f64 / scale),
+        Err(_) => (0.0, 0.0),
+    }
+}
+
+/// 手动拖动：按逻辑坐标移动窗口。
+///
+/// 刻意不用 tao 的 `drag_window` / `start_dragging` —— 它靠
+/// `SendMessage(WM_NCLBUTTONDOWN, HTCAPTION)` 冒充"按住标题栏拖动"，
+/// DWM 会因此画出一条标题栏帧。那条帧画出来之后样式位是干净的，
+/// 轮询里的 strip_caption 没有变化可清、也不会触发框架重算，
+/// 于是"点一下词板就冒出一条标题栏"，要等到下次 resize（调整设置）才消失。
+/// 改成前端回传屏幕坐标、这里 SetWindowPos 跟着走，从源头不碰非客户区。
+#[tauri::command]
+pub fn move_window_logical(win: WebviewWindow, x: f64, y: f64) {
+    let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+}
+
 /// 让词板临时显形 ms 毫秒（设置页调宽高时用，连续调用会把截止时间往后推）。
 /// 锁定状态下不显形：锁了就该彻底消失。
 #[tauri::command]
