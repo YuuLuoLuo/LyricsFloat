@@ -116,10 +116,15 @@ def main():
         return 0
 
     expr = sys.argv[2] if len(sys.argv) > 2 else "1"
+    # 可选第 3 个参数：按标题筛窗口（两个窗口标题都叫"歌词板"，靠它区分）
+    match = sys.argv[3] if len(sys.argv) > 3 else ""
     targets = [p for p in pages() if p.get("type") == "page"]
+    if match:
+        targets = [p for p in targets if (p.get("title") or "") == match]
     if cmd == "eval":
-        # 优先挑设置页
-        targets.sort(key=lambda p: 0 if "settings" in (p.get("url") or "") + (p.get("title") or "") else 1)
+        if not match:
+            # 没指定窗口时优先挑设置页
+            targets.sort(key=lambda p: 0 if "设置" in (p.get("url") or "") + (p.get("title") or "") else 1)
         targets = targets[:1]
 
     for p in targets:

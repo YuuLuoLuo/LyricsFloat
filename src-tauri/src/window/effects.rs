@@ -96,6 +96,46 @@ pub fn strip_window_border(win: &WebviewWindow) {
     }
 }
 
+/// 把 `WS_CAPTION` 一族从窗口样式里彻底摘掉，返回是否真的动过样式。
+///
+/// tao 造无边框窗口时，只把 `WS_CAPTION` 从 `AdjustWindowRectEx` 用的那份样式里
+/// 去掉，真正写进 `GWL_STYLE` 的**始终带着** `WS_CAPTION | WS_SYSMENU`。
+/// 平时看不出问题（窗口全透明），但只要 tao 因为某个标志变化——
+/// `set_ignore_cursor_events`（悬停进出必调）、`set_always_on_top`、`show` 等——
+/// 把整份样式 `SetWindowLongW` 重写一遍再 `SWP_FRAMECHANGED`，
+/// DWM 就会按「这是一个带标题栏的窗口」重新算一遍非客户区：
+/// 屏幕上闪出一条浅色标题栏，右边还带着最小化 / 关闭按钮，歌词被往下挤。
+/// 这就是"偶现的标题栏"。
+pub fn strip_caption(win: &WebviewWindow) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        return hwnd_of(win).map(imp::strip_caption).unwrap_or(false);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = win;
+        false
+    }
+}
+
+/// 自己管鼠标穿透，不用 tao 的 `set_ignore_cursor_events`。
+///
+/// 穿透只需要扩展样式里的 `WS_EX_TRANSPARENT`：命中测试当场生效，不必重算框架。
+/// 而 tao 的版本每调一次都要重写整份窗口样式 + `SWP_FRAMECHANGED` ——
+/// 悬停进出各一次，正好是最频繁触发上面那条标题栏的动作。
+pub fn set_click_through(win: &WebviewWindow, on: bool) {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(hwnd) = hwnd_of(win) {
+            imp::set_ex_transparent(hwnd, on);
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (win, on);
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn hwnd_of(win: &WebviewWindow) -> Option<windows::Win32::Foundation::HWND> {
     use windows::Win32::Foundation::HWND;
@@ -117,7 +157,13 @@ mod imp {
     use windows::Win32::Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, SetWindowRgn};
     use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
     use windows::Win32::UI::HiDpi::GetDpiForWindow;
-    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongW, GetWindowRect, SetWindowLongW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_BORDER,
+        WS_CAPTION, WS_DLGFRAME, WS_EX_CLIENTEDGE, WS_EX_DLGMODALFRAME, WS_EX_LAYERED,
+        WS_EX_STATICEDGE, WS_EX_TRANSPARENT, WS_EX_WINDOWEDGE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+        WS_SYSMENU, WS_THICKFRAME,
+    };
 
     pub const ACCENT_NONE: u32 = 0;
     pub const ACCENT_ACRYLIC: u32 = 4;
@@ -237,6 +283,74 @@ mod imp {
             if SetWindowRgn(hwnd, rgn, true) == 0 {
                 let _ = DeleteObject(rgn);
             }
+        }
+    }
+
+    /// 摘掉标题栏样式。只在样式真的变了的时候才写一次，
+    /// 轮询里反复调用不会一直触发 SetWindowPos。
+    pub fn strip_caption(hwnd: HWND) -> bool {
+        // 这几个位一起摘：CAPTION 本身包含 BORDER | DLGFRAME，
+        // 单独留着任何一个，DWM 都还会认为"这是个有边框的窗口"
+        let drop = WS_CAPTION.0
+            | WS_SYSMENU.0
+            | WS_THICKFRAME.0
+            | WS_MINIMIZEBOX.0
+            | WS_MAXIMIZEBOX.0
+            | WS_DLGFRAME.0
+            | WS_BORDER.0;
+        let drop_ex = WS_EX_WINDOWEDGE.0
+            | WS_EX_DLGMODALFRAME.0
+            | WS_EX_CLIENTEDGE.0
+            | WS_EX_STATICEDGE.0;
+
+        unsafe {
+            let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+            let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            let next_style = style & !drop;
+            let next_ex = ex & !drop_ex;
+            if next_style == style && next_ex == ex {
+                return false;
+            }
+            SetWindowLongW(hwnd, GWL_STYLE, next_style as i32);
+            SetWindowLongW(hwnd, GWL_EXSTYLE, next_ex as i32);
+            // 非客户区变了，必须重算一次框架，否则那块区域还会留在屏幕上
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            true
+        }
+    }
+
+    /// 只动扩展样式：加/减 `WS_EX_TRANSPARENT`（附带 `WS_EX_LAYERED`，
+    /// 与 tao 的做法保持一致），不碰 GWL_STYLE，也就不会触发框架重算。
+    pub fn set_ex_transparent(hwnd: HWND, on: bool) {
+        unsafe {
+            let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            let next = if on {
+                ex | WS_EX_TRANSPARENT.0 | WS_EX_LAYERED.0
+            } else {
+                ex & !(WS_EX_TRANSPARENT.0 | WS_EX_LAYERED.0)
+            };
+            if next == ex {
+                return;
+            }
+            SetWindowLongW(hwnd, GWL_EXSTYLE, next as i32);
+            // 扩展样式不影响框架，只要让系统重新算一次命中测试
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
         }
     }
 }

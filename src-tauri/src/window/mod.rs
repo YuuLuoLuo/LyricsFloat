@@ -64,12 +64,17 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     // 不要标题：tao 会给无边框窗口留着 CAPTION 样式位，
     // DWM 会照着窗口标题在左上角画出"歌词板"三个字
     let _ = win.set_title("");
-    let _ = win.set_ignore_cursor_events(true);
+    effects::set_click_through(&win, true);
+    // tao 建窗口时把 WS_CAPTION 一起写进了 GWL_STYLE，这里先摘干净，
+    // 之后由悬停轮询盯着（tao 每次改标志都会把它塞回来）
+    effects::strip_caption(&win);
 
     if let Some(settings_win) = app.get_webview_window("settings") {
         effects::set_transparent_background(&settings_win);
         effects::set_system_corner(&settings_win, true);
         effects::strip_window_border(&settings_win);
+        // 设置窗的标题栏是自绘的，同样不需要系统那份
+        effects::strip_caption(&settings_win);
     }
 
     // 前端拿到位置后自己 show；这里兜底，避免前端异常时窗口永远不出现
@@ -89,12 +94,14 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
 
 fn reveal_on(win: &WebviewWindow) {
     effects::enable_glass(win, GLASS_COLOR.load(Ordering::Relaxed));
-    let _ = win.set_ignore_cursor_events(false);
+    effects::set_click_through(win, false);
+    effects::strip_caption(win);
 }
 
 fn reveal_off(win: &WebviewWindow) {
     effects::disable_glass(win);
-    let _ = win.set_ignore_cursor_events(true);
+    effects::set_click_through(win, true);
+    effects::strip_caption(win);
 }
 
 /// 托盘 / 快捷键共用：切换锁定
@@ -156,6 +163,8 @@ fn resize_exact(win: &WebviewWindow, width: f64, height: f64) {
             let _ = win.set_size(tauri::PhysicalSize::new(want_w, want_h));
         }
     }
+    // set_size 之后 tao 也会重写样式，顺手把标题栏摘掉
+    effects::strip_caption(win);
     // 尺寸变了形状还是旧区域，必须按新尺寸重裁一次。
     // set_size 是异步生效的，立刻量还是旧尺寸，所以稍后补一次。
     effects::apply_round_region(win);
@@ -171,6 +180,7 @@ fn resize_exact(win: &WebviewWindow, width: f64, height: f64) {
 pub fn set_always_on_top(app: AppHandle, on: bool) {
     if let Some(win) = board(&app) {
         let _ = win.set_always_on_top(on);
+        effects::strip_caption(&win);
     }
 }
 
@@ -181,6 +191,8 @@ pub fn open_settings(app: AppHandle) {
     };
     // 刻意不动词板的显形状态：设置页开着不等于词板在悬停
     let _ = win.show();
+    // show 会让 tao 重写一次窗口样式，标题栏样式要再摘一次
+    effects::strip_caption(&win);
     let _ = win.set_focus();
 }
 

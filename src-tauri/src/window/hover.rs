@@ -22,6 +22,11 @@ pub fn spawn(app: AppHandle, win: WebviewWindow) {
         loop {
             thread::sleep(Duration::from_millis(TICK_MS));
 
+            // 兜底：只要有谁把 WS_CAPTION 塞回窗口样式（tao 在 set_size /
+            // set_always_on_top / show 之后都会整份重写一次），就地摘掉。
+            // 样式没变时这里只做两次 GetWindowLongW，开销可以忽略。
+            effects::strip_caption(&win);
+
             let locked = LOCKED.load(Ordering::Relaxed);
             let current = REVEALED.load(Ordering::Relaxed);
 
@@ -72,11 +77,13 @@ pub fn spawn(app: AppHandle, win: WebviewWindow) {
 fn reveal(win: &WebviewWindow, on: bool) {
     if on {
         effects::enable_glass(win, GLASS_COLOR.load(Ordering::Relaxed));
-        let _ = win.set_ignore_cursor_events(false);
+        effects::set_click_through(win, false);
     } else {
         effects::disable_glass(win);
-        let _ = win.set_ignore_cursor_events(true);
+        effects::set_click_through(win, true);
     }
+    // 刚切过状态，顺手确认一次样式（tao 的其它调用也可能把标题栏塞回来）
+    effects::strip_caption(win);
 }
 
 #[cfg(windows)]
