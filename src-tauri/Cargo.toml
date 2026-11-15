@@ -39,6 +39,11 @@ windows = { version = "0.58", features = [
     "Storage_Streams",
 ] }
 
+[features]
+# 生产构建必须带上：tauri crate 编译时不启用 custom-protocol 就会走 devUrl
+# （连本地开发服务器）。`tauri build` CLI 会自动开，裸 cargo build --release 要手动 --features custom-protocol。
+custom-protocol = ["tauri/custom-protocol"]
+
 [profile.release]
 codegen-units = 1
 lto = true
