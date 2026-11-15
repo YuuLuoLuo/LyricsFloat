@@ -33,6 +33,23 @@ pub struct NowPlaying {
     pub fresh: bool,
 }
 
+/// 暂停位置的状态机。
+///
+/// 播放器在暂停那一刻不一定刷新 timeline：`Position` 还是「上次更新那一刻」的值，
+/// 比我们播放时外推到的时间点早好几秒。直接把它报出去，前端就会看到进度突然倒退，
+/// 把时钟往回拽 —— 表现就是"暂停后歌词先滑到下一句，随后又弹回来"。
+/// 所以暂停后第一次读到，先按外推值把位置钉住，之后一直报这个冻结值；
+/// 只有 timeline 真的变了（用户在暂停状态下拖进度条）才跟着更新。
+#[derive(Default)]
+struct PauseState {
+    /// 上一拍读到的原始 timeline 位置
+    last_raw: f64,
+    /// 暂停期间对外报的位置（冻结值）
+    frozen: Option<f64>,
+    /// 上一拍是否在播
+    was_playing: bool,
+}
+
 pub fn spawn(app: AppHandle) {
     thread::spawn(move || {
         #[cfg(windows)]
@@ -43,9 +60,10 @@ pub fn spawn(app: AppHandle) {
 
         let mut last_key = String::new();
         let mut was_alive = false;
+        let mut pause = PauseState::default();
 
         loop {
-            match read_snapshot() {
+            match read_snapshot(&mut pause) {
                 Some(np) => {
                     was_alive = true;
                     store(Some(&np));
@@ -103,7 +121,7 @@ fn is_playing(
 }
 
 #[cfg(windows)]
-fn read_snapshot() -> Option<NowPlaying> {
+fn read_snapshot(st: &mut PauseState) -> Option<NowPlaying> {
     use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager as Manager;
 
     let mgr = Manager::RequestAsync().ok()?.get().ok()?;
@@ -159,9 +177,28 @@ fn read_snapshot() -> Option<NowPlaying> {
             const MAX_AGE: f64 = 15.0;
             const FRESH_SECS: f64 = 2.5;
             let age = if elapsed.is_finite() && elapsed > 0.0 { elapsed } else { 0.0 };
-            let extrapolate = if playing && age <= MAX_AGE { age } else { 0.0 };
+            let valid = age <= MAX_AGE;
+            let extrapolate = if valid { age } else { 0.0 };
             let fresh = age <= FRESH_SECS;
-            let pos = (raw + extrapolate).max(0.0);
+            let now_pos = (raw + extrapolate).max(0.0);
+
+            // 暂停时 timeline 不再刷新，外推值会一直往上走，所以只能取一次。
+            // 取的就是"这一刻"的外推值 —— 它才是按下暂停时真正的播放位置。
+            let raw_changed = (raw - st.last_raw).abs() > 0.05;
+            let pos = if playing {
+                st.frozen = None;
+                st.was_playing = true;
+                st.last_raw = raw;
+                now_pos
+            } else {
+                let take = st.was_playing || st.frozen.is_none() || raw_changed;
+                if take {
+                    st.frozen = Some(now_pos);
+                    st.last_raw = raw;
+                }
+                st.was_playing = false;
+                st.frozen.unwrap_or(now_pos)
+            };
             let pos = if end > 0.0 { pos.min(end) } else { pos };
             (pos, end, fresh)
         }
@@ -180,6 +217,6 @@ fn read_snapshot() -> Option<NowPlaying> {
 }
 
 #[cfg(not(windows))]
-fn read_snapshot() -> Option<NowPlaying> {
+fn read_snapshot(_st: &mut PauseState) -> Option<NowPlaying> {
     None
 }

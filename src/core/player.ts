@@ -75,6 +75,7 @@ async function loadLyric(np: NowPlaying): Promise<void> {
   lastRawMs = Number.NaN
   rawChangedAt = 0
   negStreak = 0
+  moveStreak = 0
   const token = ++loadToken
 
   runtime.trackTitle = np.title
@@ -109,6 +110,8 @@ let rawChangedAt = 0
 let lastAdvanceAt = 0
 /** 连续几次采样都说"我们比播放器超前" */
 let negStreak = 0
+/** 播放器报 Paused、进度却还在往前走的次数（见 applyTick 里的误报判断） */
+let moveStreak = 0
 
 /**
  * 用采样校准时钟。
@@ -120,7 +123,13 @@ let negStreak = 0
  * 差值恒定，永远等不到一次正向修正。现在让它连 3 次都说超前才回锚，
  * 单次滞后（timeline 落后于实际）仍然被忽略，不会重现"两句抽搐"。
  */
-function calibrate(posMs: number): void {
+function calibrate(posMs: number, playing: boolean): void {
+  if (!playing) {
+    // 暂停：只认明显的拖动，别按采样滞后往回拽
+    clock.syncPaused(posMs)
+    negStreak = 0
+    return
+  }
   const diff = posMs - clock.read()
   if (diff < -500) {
     if (diff < -8000 || ++negStreak >= 3) {
@@ -147,22 +156,25 @@ function applyTick(np: NowPlaying): void {
     const firstSeen = Number.isNaN(lastRawMs)
     lastRawMs = rawMs
     rawChangedAt = now
-    // 第一次读到某个数值不代表"在走"：播放器说暂停时就别让时钟先跑起来，
-    // 否则刚开机那两秒歌词会白白超前半秒。
-    if (!firstSeen || np.playing) lastAdvanceAt = now
+    if (!firstSeen) {
+      lastAdvanceAt = now
+      if (!np.playing) moveStreak++
+    }
   }
+  if (np.playing) moveStreak = 0
 
-  // 有播放器在播放中仍报 Paused。判断依据不能是"连续几个 tick 都在涨"——
-  // timeline 五秒才更新一次的话，那个计数永远攒不够，歌词就一直冻着。
-  // 改成看「最近 2.5 秒内进度有没有真的往前走」。
-  const advancing = now - lastAdvanceAt < 2500
-  const playing = np.playing || advancing
+  // 以前用「2.5 秒内进度动过」推断在播 —— 播放器报暂停后那 2.5 秒时钟照样外推，
+  // 歌词先滑到下一句，等推断结束时再回锚，看着就是"弹回去"。
+  // 现在直接信播放器的暂停状态；只有那种播放中也报 Paused 的播放器
+  // （位置却一直在前进）才在连续两次前进后重新认定在播。
+  const misreport = !np.playing && moveStreak >= 2 && now - lastAdvanceAt < 2000
+  const playing = np.playing || misreport
   const posMs = playing ? rawMs + (now - rawChangedAt) : rawMs
 
   // 先定"在不在播"，再校准：顺序反过来时，播放器误报 Paused 会让
   // 时钟走"暂停"分支，每 250ms 硬跳一次，歌词就来回抽搐。
   clock.setPlaying(playing)
-  calibrate(posMs)
+  calibrate(posMs, playing)
 
   runtime.playing = np.playing
   runtime.position = np.position
@@ -204,6 +216,7 @@ export async function initPlayer(): Promise<() => void> {
       rawChangedAt = 0
       lastAdvanceAt = 0
       negStreak = 0
+      moveStreak = 0
       clock.setPlaying(false)
       runtime.doc = null
       runtime.playing = false

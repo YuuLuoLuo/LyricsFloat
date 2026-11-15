@@ -46,7 +46,7 @@ export class PlayClock {
     // 暂停时只认大幅跳变（拖了进度条）。逐拍 seek 会让时钟一格一格往前蹦，
     // 歌词看着就是在抖。
     if (!this.running) {
-      if (Math.abs(diff) > 1200) this.seek(pos)
+      this.syncPaused(pos)
       return
     }
 
@@ -67,6 +67,18 @@ export class PlayClock {
     // 小于噪声阈值的差异不校正：校正本身就会让画面轻微地来回动
     if (diff < 120) return
     this.drift = Math.min(400, this.drift + diff * 0.5)
+  }
+
+  /**
+   * 暂停状态的校准：只跟"用户真的动了进度条"。
+   *
+   * 暂停后播放器报的位置天然带一点滞后（它只在上次刷新时记了个数），
+   * 拿它逐拍修正，时钟就会被一次次往回拽 —— 歌词向下一句滑过去再弹回来。
+   * 所以正向留 400ms 的容忍（拖进度条通常是几秒），反向只认明显的大跳。
+   */
+  syncPaused(pos: number): void {
+    const diff = pos - this.read()
+    if (diff > this.seekThreshold || diff < -2500) this.seek(pos)
   }
 
   /** 每帧调用（dt 单位 ms），让偏差指数衰减到 0 */
