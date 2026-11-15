@@ -44,9 +44,10 @@ export class PlayClock {
     const diff = pos - this.read()
 
     // 暂停时只认大幅跳变（拖了进度条）。逐拍 seek 会让时钟一格一格往前蹦，
-    // 歌词看着就是在抖。
+    // 歌词看着就是在抖。走到这里说明调用方没区分"重复采样"，
+    // 一律不许往回拽。
     if (!this.running) {
-      this.syncPaused(pos)
+      this.syncPaused(pos, false)
       return
     }
 
@@ -70,15 +71,24 @@ export class PlayClock {
   }
 
   /**
-   * 暂停状态的校准：只跟"用户真的动了进度条"。
+   * 暂停状态的校准。
    *
-   * 暂停后播放器报的位置天然带一点滞后（它只在上次刷新时记了个数），
+   * 暂停后播放器报的位置天然带一点滞后（它只记着上次刷新时的数），
    * 拿它逐拍修正，时钟就会被一次次往回拽 —— 歌词向下一句滑过去再弹回来。
-   * 所以正向留 400ms 的容忍（拖进度条通常是几秒），反向只认明显的大跳。
+   *
+   * 所以分两种情形：
+   * - `honorBackward = false`：刚停下、或者播放器重复报同一个值。
+   *   这时只认"往前跳"（用户往后拖进度条不常见），绝不往回走。
+   * - `honorBackward = true`：暂停状态下位置**变了**，说明用户拖了进度条，
+   *   前后都跟。
    */
-  syncPaused(pos: number): void {
+  syncPaused(pos: number, honorBackward: boolean): void {
     const diff = pos - this.read()
-    if (diff > this.seekThreshold || diff < -2500) this.seek(pos)
+    if (diff > this.seekThreshold) {
+      this.seek(pos)
+      return
+    }
+    if (honorBackward && diff < -this.seekThreshold) this.seek(pos)
   }
 
   /** 每帧调用（dt 单位 ms），让偏差指数衰减到 0 */

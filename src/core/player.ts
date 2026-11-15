@@ -76,6 +76,7 @@ async function loadLyric(np: NowPlaying): Promise<void> {
   rawChangedAt = 0
   negStreak = 0
   moveStreak = 0
+  pausedBase = Number.NaN
   const token = ++loadToken
 
   runtime.trackTitle = np.title
@@ -112,6 +113,8 @@ let lastAdvanceAt = 0
 let negStreak = 0
 /** 播放器报 Paused、进度却还在往前走的次数（见 applyTick 里的误报判断） */
 let moveStreak = 0
+/** 暂停期间上一次报上来的位置，用来分辨"重复采样"和"用户拖了进度条" */
+let pausedBase = Number.NaN
 
 /**
  * 用采样校准时钟。
@@ -124,12 +127,6 @@ let moveStreak = 0
  * 单次滞后（timeline 落后于实际）仍然被忽略，不会重现"两句抽搐"。
  */
 function calibrate(posMs: number, playing: boolean): void {
-  if (!playing) {
-    // 暂停：只认明显的拖动，别按采样滞后往回拽
-    clock.syncPaused(posMs)
-    negStreak = 0
-    return
-  }
   const diff = posMs - clock.read()
   if (diff < -500) {
     if (diff < -8000 || ++negStreak >= 3) {
@@ -174,7 +171,19 @@ function applyTick(np: NowPlaying): void {
   // 先定"在不在播"，再校准：顺序反过来时，播放器误报 Paused 会让
   // 时钟走"暂停"分支，每 250ms 硬跳一次，歌词就来回抽搐。
   clock.setPlaying(playing)
-  calibrate(posMs, playing)
+
+  if (playing) {
+    pausedBase = Number.NaN
+    calibrate(posMs, true)
+  } else {
+    // 暂停：分辨"同一份采样又来一遍"和"位置真的变了"。
+    // 前者是在重复报旧值，绝不能拿它把时钟往回拽；后者多半是用户拖了进度条。
+    const repeated = !Number.isNaN(pausedBase) && Math.abs(posMs - pausedBase) <= 50
+    const moved = !Number.isNaN(pausedBase) && !repeated
+    pausedBase = posMs
+    clock.syncPaused(posMs, moved)
+    negStreak = 0
+  }
 
   runtime.playing = np.playing
   runtime.position = np.position
@@ -217,6 +226,7 @@ export async function initPlayer(): Promise<() => void> {
       lastAdvanceAt = 0
       negStreak = 0
       moveStreak = 0
+      pausedBase = Number.NaN
       clock.setPlaying(false)
       runtime.doc = null
       runtime.playing = false

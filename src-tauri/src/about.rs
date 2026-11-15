@@ -119,14 +119,13 @@ fn fetch_latest(repo: &str) -> Result<UpdateInfo, String> {
         .map(|s| s.to_string())
         .unwrap_or_else(|| format!("https://github.com/{repo}/releases/latest"));
 
-    // Release 说明可能很长，截断到够看的长度就停
-    let notes = json
-        .get("body")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .chars()
-        .take(900)
-        .collect::<String>();
+    // Release 说明是 Markdown / 少量 HTML（<details> 之类），这里只留纯文本：
+    // 前端用 <pre> 渲染，标签原样显示会很难看，而解析 Markdown 又太重。
+    let notes = tidy_notes(
+        json.get("body")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default(),
+    );
 
     let published = json
         .get("published_at")
@@ -171,6 +170,65 @@ fn is_newer(latest: &str, current: &str) -> bool {
     false
 }
 
+/// Release 说明清洗成"可读的纯文本"：
+/// - HTML 标签（<details>、<a href>…）直接扔掉，只留标签之间的内容
+/// - Markdown 链接 [文字](url) 留文字
+/// - 连续空行压成一行，行尾空白去掉
+fn tidy_notes(body: &str) -> String {
+    let mut out = String::with_capacity(body.len().min(1024));
+    let mut in_tag = false;
+    let mut chars = body.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            '[' => {
+                // 吃掉 [text](url) 里的 (url)：遇到 ']' 且下一个是 '(' 就跳过整个括号
+                let mut text = String::new();
+                let mut depth = 0usize;
+                while let Some(&n) = chars.peek() {
+                    if n == ']' && depth == 0 {
+                        chars.next();
+                        break;
+                    }
+                    text.push(n);
+                    chars.next();
+                }
+                if chars.peek() == Some(&'(') {
+                    chars.next();
+                    let mut paren = 1usize;
+                    for n in chars.by_ref() {
+                        if n == '(' {
+                            paren += 1;
+                        } else if n == ')' {
+                            paren -= 1;
+                            if paren == 0 {
+                                break;
+                            }
+                        }
+                    }
+                }
+                out.push_str(&text);
+            }
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    let mut cleaned: Vec<&str> = out
+        .lines()
+        .map(str::trim_end)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if cleaned.len() > 40 {
+        cleaned.truncate(40);
+    }
+    let mut s = cleaned.join("\n");
+    if s.chars().count() > 900 {
+        s = s.chars().take(900).collect::<String>() + "…";
+    }
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +240,11 @@ mod tests {
         assert!(!is_newer("v0.2.0", "0.2.0"));
         assert!(!is_newer("0.1.9", "0.2.0"));
         assert!(!is_newer("", "0.2.0"));
+    }
+
+    #[test]
+    fn cleans_release_notes() {
+        let src = "<details><summary>更新</summary>\n\n## 新内容\n\n- 支持 [翻译](https://example.com)\n</details>\n";
+        assert_eq!(tidy_notes(src), "更新\n## 新内容\n- 支持 翻译");
     }
 }
