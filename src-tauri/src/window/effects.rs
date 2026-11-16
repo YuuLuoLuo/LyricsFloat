@@ -136,6 +136,25 @@ pub fn set_click_through(win: &WebviewWindow, on: bool) {
     }
 }
 
+/// 子类化窗口过程，接管 `WM_NCCALCSIZE`：整窗都算客户区，非客户区永远为 0。
+///
+/// 这是"标题栏帧"的终极解法 —— 不管 WS_CAPTION 被谁（tao 的样式重写、
+/// DWM 的帧缓存）塞回来，非客户区不存在，DWM 就没有地方画标题栏/边框。
+/// 光靠 strip_caption 摘样式位不够：帧画出来之后样式位是干净的，
+/// 轮询没有变化可清、不触发框架重算，帧就一直留到下次 resize。
+pub fn subclass_frameless(win: &WebviewWindow) {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(hwnd) = hwnd_of(win) {
+            imp::subclass_frameless(hwnd);
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = win;
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn hwnd_of(win: &WebviewWindow) -> Option<windows::Win32::Foundation::HWND> {
     use windows::Win32::Foundation::HWND;
@@ -351,6 +370,41 @@ mod imp {
                 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
             );
+        }
+    }
+
+    /// 子类化标识："LYRB"
+    const SUBCLASS_ID: usize = 0x4C59_5242;
+
+    /// 窗口过程：拦截 WM_NCCALCSIZE，整窗即客户区。
+    /// 其余消息原样走默认处理，不动 tao / WebView2 的任何逻辑。
+    unsafe extern "system" fn frameless_proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: windows::Win32::Foundation::WPARAM,
+        lparam: windows::Win32::Foundation::LPARAM,
+        _uid: usize,
+        _ref: usize,
+    ) -> windows::Win32::Foundation::LRESULT {
+        use windows::Win32::Foundation::LRESULT;
+        use windows::Win32::UI::Shell::DefSubclassProc;
+        use windows::Win32::UI::WindowsAndMessaging::WM_NCCALCSIZE;
+
+        if msg == WM_NCCALCSIZE {
+            // wParam=TRUE: lParam 是 NCCALCSIZE_PARAMS*，返回 0 = 提出的新窗口矩形
+            // 整个都算客户区。wParam=FALSE: lParam 是 RECT*，返回 0 = 矩形不变。
+            // 两种情况都是"没有非客户区"。
+            return LRESULT(0);
+        }
+        DefSubclassProc(hwnd, msg, wparam, lparam)
+    }
+
+    /// 安装子类化。同一个窗口重复调用只替换一次（SetWindowSubclass 本身对
+    /// 同一 (hwnd, proc, id) 幂等）。
+    pub fn subclass_frameless(hwnd: HWND) {
+        use windows::Win32::UI::Shell::SetWindowSubclass;
+        unsafe {
+            let _ = SetWindowSubclass(hwnd, Some(frameless_proc), SUBCLASS_ID, 0);
         }
     }
 }

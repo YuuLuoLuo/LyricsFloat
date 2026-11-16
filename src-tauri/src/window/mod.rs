@@ -68,6 +68,10 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     // tao 建窗口时把 WS_CAPTION 一起写进了 GWL_STYLE，这里先摘干净，
     // 之后由悬停轮询盯着（tao 每次改标志都会把它塞回来）
     effects::strip_caption(&win);
+    // 终极保险：子类化 WM_NCCALCSIZE，整窗永远是客户区。
+    // 光摘样式位不够 —— DWM 画出来的标题栏帧在样式干净后没人重算，
+    // 会一直留到下次 resize。非客户区为 0 就永远没地方画。
+    effects::subclass_frameless(&win);
 
     if let Some(settings_win) = app.get_webview_window("settings") {
         effects::set_transparent_background(&settings_win);
@@ -75,6 +79,7 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
         effects::strip_window_border(&settings_win);
         // 设置窗的标题栏是自绘的，同样不需要系统那份
         effects::strip_caption(&settings_win);
+        effects::subclass_frameless(&settings_win);
     }
 
     // 前端拿到位置后自己 show；这里兜底，避免前端异常时窗口永远不出现
