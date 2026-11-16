@@ -669,12 +669,6 @@ onBeforeUnmount(() => {
               <input v-model="settings.info.show" type="checkbox" />
               <i></i>
             </label>
-            <p class="hint">
-              <template v-if="settings.view.rotate">
-                以对齐那一侧为圆心旋转：居左绕左边、居右绕右边，上下句模糊后压在当前句下面。
-              </template>
-              <template v-else>几种样式可以同时开启。高度压到只剩一句，就是单行显示。</template>
-            </p>
 
             <template v-if="show.card">
               <h3>歌词信息布局</h3>
@@ -1029,11 +1023,7 @@ onBeforeUnmount(() => {
             </div>
 
             <h3>使用与数据</h3>
-            <p class="hint">
-              鼠标移到词板上才会显形，此时可以拖动或右键；锁定后点击直接穿过去。
-              歌词取自公开歌词库，找不到时词板会写明原因。
-            </p>
-            <p class="hint">设置只存在本机，不收集也不上传任何使用数据。</p>
+            <p class="hint">设置只存在本机，不上传任何使用数据。</p>
           </section>
         </div>
       </div>
