@@ -6,7 +6,7 @@
 # 两者由 cargo test 的 version_matches_cargo 守着，改版本时两处一起改。
 #
 # 用法：bash scripts/pack.sh
-# 产物：release/lyric-board_<版本>.exe
+# 产物：release/LyricsFloat_<版本>.exe
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -27,7 +27,9 @@ cargo build --release --features custom-protocol --manifest-path src-tauri/Cargo
 
 echo "==> 3/3 复制产物"
 mkdir -p release
-OUT="release/lyric-board_${VER}.exe"
-cp src-tauri/target/release/lyric-board.exe "$OUT"
-rm -f release/lyric-board.exe
+OUT="release/LyricsFloat_${VER}.exe"
+cp src-tauri/target/release/lyricsfloat.exe "$OUT"
+rm -f release/lyricsfloat.exe release/lyric-board.exe
+# 只留当前版本这一个，release 里不会堆一排旧 exe 让人看花眼
+find release -maxdepth 1 -name '*.exe' ! -name "$(basename "$OUT")" -delete
 echo "完成：$OUT"

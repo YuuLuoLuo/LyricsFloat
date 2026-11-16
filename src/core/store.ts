@@ -95,7 +95,26 @@ export const DEFAULTS: AppSettings = {
   lyric: { offsetMs: 0 },
 }
 
-const KEY = 'lyricboard.settings.v3'
+const KEY = 'lyricsfloat.settings.v3'
+/** 改名（歌词板 -> LyricsFloat）前的存储键，首次读到就顺手迁到新键 */
+const OLD_KEY = 'lyricboard.settings.v3'
+
+/** 先读新键，没有就看看老键（迁移一次，之后只认新键） */
+function readRaw(): string | null {
+  try {
+    const raw = localStorage.getItem(KEY)
+    if (raw) return raw
+    const old = localStorage.getItem(OLD_KEY)
+    if (old) {
+      localStorage.setItem(KEY, old)
+      localStorage.removeItem(OLD_KEY)
+      return old
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
+}
 
 /**
  * 老版本用 `view.mode` 一个枚举选样式，现在拆成四个独立开关。
@@ -186,7 +205,7 @@ function tame(s: AppSettings): AppSettings {
 
 function load(): AppSettings {
   try {
-    const raw = localStorage.getItem(KEY)
+    const raw = readRaw()
     if (!raw) return JSON.parse(JSON.stringify(DEFAULTS))
     return adopt(JSON.parse(raw))
   } catch {
@@ -220,7 +239,7 @@ export function adoptSettings(raw: unknown): boolean {
 /** 本地缓存里到底有没有存过设置（用来决定"要不要拿磁盘上的文件覆盖"） */
 export function hasLocalSettings(): boolean {
   try {
-    return localStorage.getItem(KEY) !== null
+    return readRaw() !== null
   } catch {
     return false
   }
@@ -249,7 +268,7 @@ export function saveSettings(): void {
 /** 应用另一窗口写入的设置（设置页改完 -> 词板立即跟着变） */
 export function pullSettings(): void {
   try {
-    const raw = localStorage.getItem(KEY)
+    const raw = readRaw()
     if (!raw || raw === lastSerialized) return
     lastSerialized = raw
     Object.assign(settings, adopt(JSON.parse(raw)))

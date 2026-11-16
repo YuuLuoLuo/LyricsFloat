@@ -2,11 +2,11 @@
  * 设置落盘。
  *
  * 结论先说：以前设置**只**在 WebView2 的 localStorage 里
- * （`%LOCALAPPDATA%\com.yuluo.lyricboard\EBWebView\Default\Local Storage\leveldb`）。
+ * （`%LOCALAPPDATA%\com.yuluo.lyricsfloat\EBWebView\Default\Local Storage\leveldb`）。
  * 那份数据确实跟着应用标识走，换 exe 不丢，但它没法备份、换机器就没了、
  * 清一次缓存全空。
  *
- * 现在改成：**exe 同目录的 `lyric-board.settings.json` 为准**，localStorage 只当缓存。
+ * 现在改成：**应用数据目录的 `settings.json` 为准**，localStorage 只当缓存。
  * 绿色版把 exe + json 一起拷走，就是完整的配置。
  */
 

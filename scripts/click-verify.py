@@ -28,7 +28,7 @@ def find_lyric_windows():
     out = []
     def cb(hwnd, _):
         pid = wintypes.DWORD(); user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        if image_name(pid.value).rsplit('\\',1)[-1] != 'lyric-board.exe': return True
+        if image_name(pid.value).rsplit('\\',1)[-1] != 'lyricsfloat.exe': return True
         cls = ctypes.create_unicode_buffer(256); user32.GetClassNameW(hwnd, cls, 256)
         if cls.value != 'Tauri Window': return True
         n = user32.GetWindowTextLengthW(hwnd)

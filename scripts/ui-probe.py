@@ -1,7 +1,7 @@
 """对窗口做"点击 + 截图"的自动化小工具，只用于本机 UI 核对。
 
 用法：
-    python scripts/ui-probe.py "歌词板设置" 860 680 click:80,106 shot:a.bmp sleep:400 shot:b.bmp
+    python scripts/ui-probe.py "LyricsFloat 设置" 860 680 click:80,106 shot:a.bmp sleep:400 shot:b.bmp
 
 坐标是逻辑像素（和 CSS 一致），内部按窗口实际宽度换算成物理像素。
 """

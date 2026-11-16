@@ -365,10 +365,24 @@ fn cache_key(title: &str, artist: &str) -> String {
 }
 
 fn cache_dir() -> Option<PathBuf> {
-    let base = std::env::var("APPDATA").ok()?;
-    let dir = PathBuf::from(base).join("lyric-board").join("lyrics");
-    fs::create_dir_all(&dir).ok()?;
-    Some(dir)
+    static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let base = PathBuf::from(std::env::var("APPDATA").ok()?);
+        // 和 settings.json 同一个应用目录，卸载时删一个文件夹就干净
+        let dir = base.join("com.yuluo.lyricsfloat").join("lyrics");
+        // 改名（歌词板 -> LyricsFloat）后缓存目录也换了：老目录还在就整体搬过来，
+        // 用户不用重新联网拉一遍歌词。
+        if !dir.exists() {
+            let old = base.join("lyric-board").join("lyrics");
+            if old.is_dir() {
+                let _ = fs::create_dir_all(dir.parent().unwrap_or(&dir));
+                let _ = fs::rename(&old, &dir);
+            }
+        }
+        fs::create_dir_all(&dir).ok()?;
+        Some(dir)
+    })
+    .clone()
 }
 
 fn read_cache(key: &str) -> Option<LyricResult> {

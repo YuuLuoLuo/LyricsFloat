@@ -6,7 +6,7 @@ async function boot() {
   const label = await currentLabel()
 
   if (label === 'settings') {
-    document.title = '歌词板设置'
+    document.title = 'LyricsFloat 设置'
     document.body.classList.add('win-settings')
     const { default: SettingsApp } = await import('./views/SettingsApp.vue')
     createApp(SettingsApp).mount('#app')

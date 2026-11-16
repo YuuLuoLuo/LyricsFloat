@@ -5,7 +5,9 @@
 //! 会让整个自启判断变成永远 false。改成直接调注册表 API，零子进程、零依赖。
 
 pub const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-pub const VALUE: &str = "LyricBoard";
+pub const VALUE: &str = "LyricsFloat";
+/// 改名前的自启项名，首次启动顺手清掉，免得注册表里留一条指向旧 exe 的死项
+const LEGACY_VALUE: &str = "LyricBoard";
 
 #[cfg(windows)]
 mod imp {
@@ -139,7 +141,9 @@ fn normalize(path: &str) -> String {
 }
 
 /// 便携版会被挪位置，登记项里的路径可能失效 —— 启动时顺手校正一次。
+/// 顺便清掉改名前的旧值名（LyricBoard），不然注册表里会留一条指向旧 exe 的死项。
 pub fn sync_path() {
+    let _ = imp::remove(LEGACY_VALUE);
     let Some(registered) = imp::query(VALUE) else {
         return;
     };

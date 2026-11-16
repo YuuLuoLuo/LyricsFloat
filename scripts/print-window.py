@@ -114,7 +114,7 @@ def grab(hwnd, path):
 
 
 if __name__ == "__main__":
-    prefix = sys.argv[1] if len(sys.argv) > 1 else "歌词板"
+    prefix = sys.argv[1] if len(sys.argv) > 1 else "LyricsFloat"
     out = sys.argv[2] if len(sys.argv) > 2 else "win.bmp"
     if prefix.startswith("size:"):
         w, hh = prefix[5:].split("x")

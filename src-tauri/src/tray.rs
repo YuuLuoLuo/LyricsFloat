@@ -58,7 +58,7 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     TrayIconBuilder::with_id("main")
         .icon(tray_icon())
         .icon_as_template(false)
-        .tooltip("歌词板")
+        .tooltip("LyricsFloat")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -118,8 +118,8 @@ pub fn sync_label(app: &AppHandle) {
     }
 
     let _ = tray.set_tooltip(Some(if locked {
-        "歌词板 · 已锁定"
+        "LyricsFloat · 已锁定"
     } else {
-        "歌词板 · 悬停显示"
+        "LyricsFloat · 悬停显示"
     }));
 }

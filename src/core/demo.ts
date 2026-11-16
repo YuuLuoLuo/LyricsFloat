@@ -45,14 +45,14 @@ export function buildDemoLyric(): LyricDoc {
 
   return {
     lines,
-    meta: { title: '不肯睡去的河', artist: '歌词板 Demo' },
+    meta: { title: '不肯睡去的河', artist: 'LyricsFloat Demo' },
     hasWordLevel: true,
   }
 }
 
 export const DEMO_TRACK = {
   title: '不肯睡去的河',
-  artist: '歌词板 Demo',
+  artist: 'LyricsFloat Demo',
   album: 'P0 技术验证',
   duration: 56000,
 }

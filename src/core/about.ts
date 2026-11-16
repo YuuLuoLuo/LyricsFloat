@@ -5,7 +5,7 @@
  * 关于页就会自己显示入口、并允许检查更新 —— 不需要改别的地方。
  */
 export const ABOUT = {
-  /** 例如 'yuluo/lyric-board'，空字符串 = 还没发布 */
+  /** 例如 'yuluo/LyricsFloat'，空字符串 = 还没发布 */
   repo: '',
   author: '羽洛洛 With Deepseek',
   /** 一句话说明，别写成功能清单 */

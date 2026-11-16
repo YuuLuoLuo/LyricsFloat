@@ -1,24 +1,34 @@
 //! 设置的落盘与导入导出。
 //!
-//! 存储位置：**应用自己的数据目录** `%APPDATA%\com.yuluo.lyricboard\settings.json`。
+//! 存储位置：**应用自己的数据目录** `%APPDATA%\com.yuluo.lyricsfloat\settings.json`。
 //!
 //! 早先只存 WebView2 的 localStorage，换机器就丢；后来改成 exe 同目录的 json，
 //! 结果绿色版旁边多一个文件、拷来拷去容易漏。现在收回到"程序内部"：
 //! 目录由应用自己管，exe 目录保持干干净净只有一个 exe。
 //! 需要备份/迁移时用导出导入（导出到桌面、把 json 拖回设置窗口）。
+//!
+//! 改名（歌词板 -> LyricsFloat）时 identifier 跟着变了，数据目录也跟着变，
+//! 所以下面还留着老目录 `com.yuluo.lyricboard` 一条迁移路径。
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 const FILE_NAME: &str = "settings.json";
+/// 改名前的数据目录（identifier），首次启动把里面的 settings.json 搬过来
+const LEGACY_APP_DIR: &str = "com.yuluo.lyricboard";
 /// 上一版放在 exe 同目录的文件名，首次启动时搬进来
 const LEGACY_NAME: &str = "lyric-board.settings.json";
 /// 导出文件里带个版本号，将来字段改名时还能认出来
-const SCHEMA: &str = "lyric-board.settings/1";
+const SCHEMA: &str = "lyricsfloat.settings/1";
 
 fn appdata_dir() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|p| PathBuf::from(p).join("com.yuluo.lyricboard"))
+    std::env::var_os("APPDATA").map(|p| PathBuf::from(p).join("com.yuluo.lyricsfloat"))
+}
+
+/// 老位置（改名前的应用数据目录）
+fn legacy_appdata_dir() -> Option<PathBuf> {
+    std::env::var_os("APPDATA").map(|p| PathBuf::from(p).join(LEGACY_APP_DIR))
 }
 
 fn exe_dir() -> Option<PathBuf> {
@@ -61,6 +71,10 @@ fn settings_path() -> Option<PathBuf> {
 
 fn legacy_candidates() -> Vec<PathBuf> {
     let mut out = Vec::new();
+    // 改名前的应用数据目录：最可能是"升级上来"的那份
+    if let Some(d) = legacy_appdata_dir() {
+        out.push(d.join(FILE_NAME));
+    }
     if let Some(d) = exe_dir() {
         out.push(d.join(LEGACY_NAME));
     }
@@ -146,7 +160,7 @@ pub fn settings_export(json: String) -> String {
         return String::new();
     };
     let stamp = timestamp();
-    let path = dir.join(format!("歌词板设置-{stamp}.json"));
+    let path = dir.join(format!("LyricsFloat设置-{stamp}.json"));
     // 导出的是"给人看的备份"，包一层 schema 方便以后校验；导入时两种形态都认
     let body = match serde_json::from_str::<serde_json::Value>(&json) {
         Ok(v) => serde_json::json!({ "schema": SCHEMA, "settings": v }),

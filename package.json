@@ -1,10 +1,10 @@
 {
-  "name": "lyric-board",
+  "name": "lyricsfloat",
   "private": true,
   "license": "MIT",
   "version": "26.11.2",
   "type": "module",
-  "description": "桌面悬浮歌词板 - 锁定全透明，悬停磨砂玻璃",
+  "description": "LyricsFloat - 桌面悬浮歌词：锁定全透明、鼠标穿透、悬停显形",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

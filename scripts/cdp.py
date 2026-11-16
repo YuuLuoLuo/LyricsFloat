@@ -116,7 +116,7 @@ def main():
         return 0
 
     expr = sys.argv[2] if len(sys.argv) > 2 else "1"
-    # 可选第 3 个参数：按标题筛窗口（两个窗口标题都叫"歌词板"，靠它区分）
+    # 可选第 3 个参数：按标题筛窗口（两个窗口标题都叫"LyricsFloat"，靠它区分）
     match = sys.argv[3] if len(sys.argv) > 3 else ""
     targets = [p for p in pages() if p.get("type") == "page"]
     if match:

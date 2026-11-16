@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-const UA: &str = "lyric-board-update-check";
+const UA: &str = "lyricsfloat-update-check";
 
 /// 版本号：年份后两位.月份_当月第几次编译（例如 `26.11_3`）。
 /// 发 GitHub Release 时 tag 用同一个字符串（带不带 v 前缀都认）。
