@@ -30,6 +30,7 @@ pub fn run() {
             autostart::set_autostart,
             lyrics::fetch_lyric,
             player::now_playing,
+            player::now_cover,
             fonts::list_fonts,
             settings_io::settings_path_cmd,
             settings_io::settings_load,

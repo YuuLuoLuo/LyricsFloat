@@ -10,7 +10,7 @@
 
 import { clock } from './clock'
 import { runtime, settings, isTauriEnv } from './store'
-import { fetchLyric, getNowPlaying, listenNative } from './bridge'
+import { fetchLyric, getNowPlaying, listenNative, getCover } from './bridge'
 import { parseLyric, mergeTranslation } from './parser'
 import { buildDemoLyric, DEMO_TRACK } from './demo'
 import type { LyricDoc } from './types'
@@ -82,8 +82,10 @@ async function loadLyric(np: NowPlaying): Promise<void> {
   runtime.trackTitle = np.title
   runtime.trackArtist = np.artist
   runtime.trackAlbum = np.album
+  runtime.trackCover = ''
   runtime.notice = ''
   runtime.loading = true
+  void loadCover(token)
 
   try {
     const payload = await fetchLyric(np.title, np.artist, np.duration)
@@ -103,6 +105,22 @@ async function loadLyric(np: NowPlaying): Promise<void> {
     runtime.notice = runtime.doc ? '' : '歌词内容为空'
   } finally {
     if (token === loadToken) runtime.loading = false
+  }
+}
+
+/**
+ * 封面是 Rust 换歌时才去读一次流的，前端问到的时机可能比缓存早一点，
+ * 所以取不到就隔一小会儿重试几次，别一直空着。
+ */
+async function loadCover(token: number): Promise<void> {
+  for (let i = 0; i < 4; i++) {
+    const url = await getCover()
+    if (token !== loadToken) return
+    if (url) {
+      runtime.trackCover = url
+      return
+    }
+    await new Promise((r) => setTimeout(r, 700))
   }
 }
 
@@ -232,6 +250,7 @@ export async function initPlayer(): Promise<() => void> {
       runtime.playing = false
       runtime.trackTitle = ''
       runtime.trackArtist = ''
+      runtime.trackCover = ''
       runtime.source = ''
       runtime.notice = '暂无播放中的媒体'
     },

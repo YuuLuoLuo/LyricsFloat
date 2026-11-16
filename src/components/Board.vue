@@ -129,6 +129,11 @@ const metaStyle = computed(() => ({
   textAlign: cardText.value === 'hidden' ? 'left' : cardText.value,
 }))
 
+/** 播放器给了封面就铺上去，没给就保持默认的渐变色块 */
+const coverStyle = computed(() =>
+  runtime.trackCover ? { backgroundImage: `url(${runtime.trackCover})` } : undefined,
+)
+
 
 /** 信息栏挪到底部时，锁定按钮也换到右上角，别和底部那行挤在一起 */
 const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
@@ -150,7 +155,12 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
         :class="[`pos-${cardPos}`, `cover-${cardCover}`]"
         :style="headStyle"
       >
-        <div v-if="cardCover !== 'hidden'" class="cover"></div>
+        <div
+          v-if="cardCover !== 'hidden'"
+          class="cover"
+          :class="{ 'has-img': !!runtime.trackCover }"
+          :style="coverStyle"
+        ></div>
         <div v-if="cardText !== 'hidden'" class="meta" :style="metaStyle">
           <div class="title">{{ runtime.trackTitle || '未在播放' }}</div>
           <div class="artist">{{ runtime.trackArtist || '等待播放器' }}</div>
@@ -280,6 +290,13 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
   background: linear-gradient(135deg, #3a3f52, #1d2030);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
   flex: none;
+}
+
+/* 真封面：铺满并居中裁切；描边保留一圈，浅色封面也能和玻璃底分开 */
+.cover.has-img {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
 .meta {

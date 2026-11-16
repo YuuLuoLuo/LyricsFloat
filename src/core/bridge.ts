@@ -54,6 +54,11 @@ export function getNowPlaying() {
   return call<NowPlayingInfo | null>('now_playing')
 }
 
+/** 当前曲目的封面（data URL）。播放器没给封面时返回 null */
+export function getCover() {
+  return call<string | null>('now_cover')
+}
+
 export function setLocked(locked: boolean) {
   return call('set_locked', { locked })
 }

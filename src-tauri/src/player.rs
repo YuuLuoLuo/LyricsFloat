@@ -20,6 +20,42 @@ const EPOCH_DIFF_SECS: f64 = 11_644_473_600.0;
 /// 所以这里留一份，让窗口挂载时能主动问一次。
 static LATEST: Mutex<Option<NowPlaying>> = Mutex::new(None);
 
+/// 封面缓存：(曲名 \u{1} 歌手, data URL)。
+///
+/// 抓封面要开一次流、读几万字节，放进每 250ms 的 tick 里太重，
+/// 所以只在换歌时抓一次，前端换歌后再问 `now_cover` 取。
+/// 拿不到时存空串，同一首不反复重试。
+static COVER: Mutex<Option<(String, String)>> = Mutex::new(None);
+
+fn cover_key(title: &str, artist: &str) -> String {
+    format!("{}\u{1}{}", title, artist)
+}
+
+/// 标准 Base64。只为封面这一处用，不值得引入依赖。
+fn b64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            T[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct NowPlaying {
     pub title: String,
@@ -100,6 +136,56 @@ pub fn now_playing() -> Option<NowPlaying> {
     LATEST.lock().ok().and_then(|g| g.clone())
 }
 
+/// 当前曲目的封面（data URL）。取不到返回 None。
+#[tauri::command]
+pub fn now_cover() -> Option<String> {
+    let np = LATEST.lock().ok().and_then(|g| g.clone())?;
+    let key = cover_key(&np.title, &np.artist);
+    let g = COVER.lock().ok()?;
+    match g.as_ref() {
+        Some((k, v)) if *k == key && !v.is_empty() => Some(v.clone()),
+        _ => None,
+    }
+}
+
+/// 从 SMTC 的缩略图流里读一张封面，编成 data URL。
+#[cfg(windows)]
+fn grab_cover(
+    props: &windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties,
+) -> Option<String> {
+    use windows::core::Interface;
+    use windows::Storage::Streams::{DataReader, IInputStream, IRandomAccessStreamWithContentType};
+
+    let thumb = props.Thumbnail().ok()?;
+    let op: windows::Foundation::IAsyncOperation<IRandomAccessStreamWithContentType> =
+        thumb.OpenReadAsync().ok()?;
+    let stream = op.get().ok()?;
+    let size = stream.Size().ok()? as usize;
+    // 正常封面 20~200 KB；超过 3 MB 的一律不要，免得 base64 卡住 IPC
+    if size == 0 || size > 3_000_000 {
+        return None;
+    }
+
+    let input = stream.cast::<IInputStream>().ok()?;
+    let reader = DataReader::CreateDataReader(&input).ok()?;
+    reader.LoadAsync(size as u32).ok()?.get().ok()?;
+    let mut buf = vec![0u8; size];
+    reader.ReadBytes(&mut buf).ok()?;
+
+    let mime = if buf.starts_with(&[0x89, b'P', b'N', b'G']) {
+        "image/png"
+    } else if buf.starts_with(b"GIF8") {
+        "image/gif"
+    } else if buf.starts_with(b"BM") {
+        "image/bmp"
+    } else if buf.len() > 12 && &buf[0..4] == b"RIFF" && &buf[8..12] == b"WEBP" {
+        "image/webp"
+    } else {
+        "image/jpeg"
+    };
+    Some(format!("data:{};base64,{}", mime, b64(&buf)))
+}
+
 #[cfg(windows)]
 fn now_unix() -> f64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -151,6 +237,19 @@ fn read_snapshot(st: &mut PauseState) -> Option<NowPlaying> {
 
     if title.is_empty() {
         return None;
+    }
+
+    // 换歌就抓一次封面；取不到也缓存空串，同一首歌不反复开流
+    let key = cover_key(&title, &artist);
+    let need = match COVER.lock() {
+        Ok(g) => !matches!(g.as_ref(), Some((k, _)) if *k == key),
+        Err(_) => false,
+    };
+    if need {
+        let data = grab_cover(&props).unwrap_or_default();
+        if let Ok(mut g) = COVER.lock() {
+            *g = Some((key, data));
+        }
     }
 
     let playing = is_playing(&session);
