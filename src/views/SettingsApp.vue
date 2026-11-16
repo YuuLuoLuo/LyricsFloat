@@ -68,13 +68,30 @@ const tab = ref<(typeof TABS)[number]['id']>('general')
  */
 const previewDoc = computed<{ lines: LyricLine[]; time: number } | null>(() => {
   const doc = runtime.doc
-  if (!doc || !doc.lines.length) return null
+  const n = doc?.lines.length ?? 0
+  if (!doc || !n) return null
   const i = findLineIndex(doc.lines, runtime.time)
-  const idx = i < 0 ? 0 : Math.min(i, doc.lines.length - 1)
-  const line = doc.lines[idx]
-  const lo = line.start
-  const hi = Math.max(line.start, line.end - 1)
-  return { lines: [line], time: Math.min(Math.max(runtime.time, lo), hi) }
+  // 预览要同时看到上下文：取一句当"当前句"，前后各带一行，共三行。
+  // 首尾句没有邻居时往里收一格，保证永远有三行可看。
+  let idx = i < 0 ? 0 : Math.min(i, n - 1)
+  idx = Math.min(Math.max(idx, 1), Math.max(0, n - 2))
+  const start = Math.max(0, Math.min(idx - 1, n - 3))
+  const lines = doc.lines.slice(start, start + 3)
+  const cur = doc.lines[idx]
+  const lo = cur.start
+  const hi = Math.max(lo, cur.end - 1)
+  return { lines, time: Math.min(Math.max(runtime.time, lo), hi) }
+})
+
+/**
+ * 预览条高度跟着字号/行距走：要放下三行，不然第三行会被裁掉。
+ * 预览只做排版参考，所以卡在 112~268px 之间，别让它把设置页挤没。
+ */
+const previewH = computed(() => {
+  const ap = settings.appearance
+  const unit = Math.max(ap.lineHeight, ap.fontSize * 1.25)
+  const trans = settings.view.translation ? 1.5 : 1
+  return Math.round(Math.min(268, Math.max(112, unit * trans * 3)))
 })
 
 let raf = 0
@@ -548,13 +565,13 @@ onBeforeUnmount(() => {
       <div class="body">
         <!-- 预览固定在顶部，不随设置滚动 -->
         <div class="preview">
-          <div class="paper" :style="previewPaper">
+          <div class="paper" :style="[previewPaper, { height: `${previewH}px` }]">
             <div class="glasslayer" :style="previewGlass"></div>
             <LyricStage
               v-if="previewDoc"
               :lines="previewDoc.lines"
               :time="previewDoc.time"
-              :height="112"
+              :height="previewH"
             />
             <div v-else class="paper-empty">{{ runtime.notice || '等待播放器' }}</div>
           </div>
@@ -773,7 +790,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="row">
               <span class="lbl">可显示</span>
-              <div class="grow muted">{{ capacity }} 行歌词（随高度自动）</div>
+              <div class="grow muted">当前可显示 {{ capacity }} 行歌词</div>
             </div>
 
             <h3>字体</h3>
@@ -1014,7 +1031,6 @@ onBeforeUnmount(() => {
                   歌词板
                   <span class="about-ver">{{ version ? `v${version}` : '—' }}</span>
                 </div>
-                <div class="about-desc">{{ ABOUT.tagline }}</div>
               </div>
             </div>
 
@@ -1225,6 +1241,7 @@ onBeforeUnmount(() => {
   position: relative;
   height: 112px;
   overflow: hidden;
+  transition: height 180ms ease;
 }
 
 .glasslayer {
@@ -1363,13 +1380,6 @@ section > h3:first-child {
   font-weight: 400;
   color: rgba(255, 255, 255, 0.36);
   font-variant-numeric: tabular-nums;
-}
-
-.about-desc {
-  margin-top: 4px;
-  font-size: 11.5px;
-  line-height: 1.55;
-  color: rgba(255, 255, 255, 0.42);
 }
 
 /* 检查结果要能一眼分出"有新版本"和"检查失败" */
