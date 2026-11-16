@@ -10,6 +10,10 @@ use serde::{Deserialize, Serialize};
 
 const UA: &str = "lyric-board-update-check";
 
+/// 版本号：年份.月份_当月第几次编译（例如 `2026.11_3`）。
+/// 发 GitHub Release 时 tag 用同一个字符串（带不带 v 前缀都认）。
+pub const APP_VERSION: &str = "2026.11_1";
+
 #[derive(Serialize, Deserialize)]
 pub struct UpdateInfo {
     pub current: String,
@@ -22,7 +26,7 @@ pub struct UpdateInfo {
 
 #[tauri::command]
 pub fn app_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
+    APP_VERSION.to_string()
 }
 
 /// 只放行 http(s)：别让前端把 file:// 之类的东西丢给系统去执行
@@ -145,16 +149,22 @@ fn fetch_latest(repo: &str) -> Result<UpdateInfo, String> {
     })
 }
 
-/// 版本号只比数字：`v0.2.1` / `0.2.1-beta` 都按 [0,2,1] 处理。
-/// 预发布标识不参与比较 —— 这个项目只往 Releases 发正式版。
+/// 版本号按「年份.月份_第几次编译」比：`2026.11_3` -> [2026, 11, 3]。
+/// 也兼容老式的 `0.2.0`，tag 前缀 v 忽略。
 fn parse_ver(s: &str) -> Vec<u64> {
-    s.trim()
-        .trim_start_matches(['v', 'V'])
-        .split(|c: char| !c.is_ascii_digit())
-        .filter(|p| !p.is_empty())
-        .take(4)
-        .filter_map(|p| p.parse::<u64>().ok())
-        .collect()
+    let t = s.trim().trim_start_matches(['v', 'V']);
+    let mut out = Vec::new();
+    for part in t.split(|c: char| c == '.' || c == '_' || c == '-' || c == '+') {
+        let digits: String = part.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if digits.is_empty() {
+            if out.is_empty() {
+                continue; // 开头的杂字符
+            }
+            break;
+        }
+        out.push(digits.parse::<u64>().unwrap_or(0));
+    }
+    out
 }
 
 fn is_newer(latest: &str, current: &str) -> bool {
@@ -235,11 +245,15 @@ mod tests {
 
     #[test]
     fn compares_versions() {
-        assert!(is_newer("v0.3.0", "0.2.9"));
-        assert!(is_newer("0.2.10", "0.2.9"));
-        assert!(!is_newer("v0.2.0", "0.2.0"));
-        assert!(!is_newer("0.1.9", "0.2.0"));
-        assert!(!is_newer("", "0.2.0"));
+        // 年份.月份_第几次编译
+        assert!(is_newer("2026.11_2", "2026.11_1"));
+        assert!(!is_newer("2026.11_1", "2026.11_1"));
+        assert!(!is_newer("2026.11_1", "2026.11_2"));
+        assert!(is_newer("v2026.12_1", "2026.11_9"));
+        assert!(is_newer("2027.1_1", "2026.12_9"));
+        // 老式语义仍然可用
+        assert!(is_newer("0.3.0", "0.2.9"));
+        assert!(!is_newer("", "2026.11_1"));
     }
 
     #[test]
