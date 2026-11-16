@@ -143,7 +143,9 @@ watch(
  * 所以收缩幅度比纯歌词小一点。
  */
 const unitH = computed(() => {
-  const lh = Math.max(1, a.value.lineHeight)
+  // 行高至少要放得下这一号的字（.txt 的 line-height 是 1.25）：
+  // 字号调大时行距跟着长，否则上下两行会直接叠在一起、溢出词板。
+  const lh = Math.max(1, a.value.lineHeight, a.value.fontSize * 1.25)
   const trans = showTrans.value ? 1.5 : 1
   const tight = rotateOn.value ? (showTrans.value ? 0.86 : 0.78) : 1
   return lh * trans * tight
@@ -309,22 +311,33 @@ function fontStack(): string {
 /**
  * 这句要缩到多小才放得下。返回 1 表示不用缩。
  *
- * 只在"这一句确实超宽"时才缩 —— 其余句子仍按设置里的字号显示，
- * 不会因为一句超长把整首歌词都变小。
+ * 只在这一句「确实放不下」时才缩：要么横向超出可用宽度，要么纵向超出这一行的
+ * 高度（字号开到很大、窗口又矮时会这样）。两个方向取更小的比例，
+ * 保证任何字号下都不会溢出词板。
+ *
+ * 可用宽高都要除以 `scale`：整行会被 transform 缩放，缩完还得塞得进去。
  */
 function fitRatio(text: string, size: number, weight: number, scale: number): number {
   if (!a.value.autoFit || !ctx || !text) return 1
-  const avail = (stageWidth.value - H_PAD * 2) / Math.max(0.5, scale)
-  if (avail <= 0) return 1
+  const s = Math.max(0.5, scale)
+  const availW = (stageWidth.value - H_PAD * 2) / s
+  const availH = Math.max(1, rowH.value) / s
+  if (availW <= 0) return 1
 
-  const key = `${text}\u0001${a.value.fontFamily}\u0001${size}\u0001${weight}\u0001${Math.round(avail)}`
+  const key = `${text}\u0001${a.value.fontFamily}\u0001${size}\u0001${weight}\u0001${Math.round(availW)}\u0001${Math.round(availH)}`
   const hit = fitCache.get(key)
   if (hit !== undefined) return hit
 
   ctx.font = `${weight} ${size}px ${fontStack()}`
   // letter-spacing: 0.01em，再留 2% 余量给抗锯齿与描边
   const w = ctx.measureText(text).width * 1.01 * 1.02
-  const r = w > avail ? Math.max(0.45, avail / w) : 1
+  let r = 1
+  if (w > availW) r = availW / w
+  // 纵向：字号 × 1.25 的行盒（开翻译时再加译文那一行）必须塞进这一行
+  const blockH = size * 1.25 * (showTrans.value ? 1.55 : 1)
+  if (blockH > availH) r = Math.min(r, availH / blockH)
+  // 下限压得很低：字号极端大时宁可小，也不能溢出界面
+  r = Math.max(0.12, r)
   if (fitCache.size > 800) fitCache.clear()
   fitCache.set(key, r)
   return r
