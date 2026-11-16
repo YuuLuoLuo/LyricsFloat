@@ -23,6 +23,12 @@ run.log
 .crop-*.png
 .crop.py
 
+# 面向 AI agent 的开发手册（内部文档，不上传仓库）
+AGENT-NOTES.md
+
+# WorkBuddy 工作日志/备忘
+.workbuddy/
+
 # 系统
 .DS_Store
 Thumbs.db
