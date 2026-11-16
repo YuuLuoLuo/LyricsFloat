@@ -37,7 +37,7 @@
 
 ## 下载与安装
 
-1. 到 [Releases](https://github.com/) 下载最新版 `LyricsFloat_<版本号>.exe`（例如 `LyricsFloat_26.11_2.exe`）。
+1. 到 [Releases](https://github.com/YuuLuoLuo/LyricsFloat/releases) 下载最新版 `LyricsFloat_<版本号>.exe`（例如 `LyricsFloat_26.11_3.exe`）。
 2. 放到任意目录双击运行即可，**绿色免安装**，不写注册表（只有开启「开机自动启动」时写一条自启项）。
 3. 首次运行会在 `%APPDATA%\com.yuluo.lyricsfloat\` 生成配置与歌词缓存，卸载时删除该目录即可。
 

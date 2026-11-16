@@ -6,7 +6,7 @@
  */
 export const ABOUT = {
   /** 例如 'yuluo/LyricsFloat'，空字符串 = 还没发布 */
-  repo: '',
+  repo: 'YuuLuoLuo/LyricsFloat',
   author: '羽洛洛 With Deepseek',
   /** 一句话说明，别写成功能清单 */
   tagline: '跟着系统里正在播放的歌，把歌词浮在桌面最上层',

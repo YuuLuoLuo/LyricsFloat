@@ -16,7 +16,7 @@ const UA: &str = "lyricsfloat-update-check";
 /// 注意：exe 的文件属性（ProductVersion / FileVersion）走的是资源格式里
 /// 的数字四段，写不了下划线，所以 Cargo.toml / tauri.conf.json 里同步写成
 /// `26.11.2`（点号版，语义完全一样），下面 `version_matches_cargo` 测试守着两边不走样。
-pub const APP_VERSION: &str = "26.11_2";
+pub const APP_VERSION: &str = "26.11_3";
 
 #[derive(Serialize, Deserialize)]
 pub struct UpdateInfo {
