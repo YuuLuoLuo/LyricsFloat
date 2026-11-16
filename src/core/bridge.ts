@@ -281,7 +281,25 @@ export async function minimizeSelf(): Promise<void> {
   }
 }
 
-const POS_KEY = 'lyricboard.pos'
+const POS_KEY = 'lyricsfloat.pos'
+/** 改名前的键，读到就当新键用并迁过去 */
+const POS_KEY_OLD = 'lyricboard.pos'
+
+function readPos(): string | null {
+  try {
+    const raw = localStorage.getItem(POS_KEY)
+    if (raw) return raw
+    const old = localStorage.getItem(POS_KEY_OLD)
+    if (old) {
+      localStorage.setItem(POS_KEY, old)
+      localStorage.removeItem(POS_KEY_OLD)
+      return old
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
+}
 
 /** 记住词板位置：拖动结束后写盘，启动时还原 */
 export async function savePosition(): Promise<void> {
@@ -297,7 +315,7 @@ export async function savePosition(): Promise<void> {
 
 export async function restorePosition(): Promise<boolean> {
   if (!isTauri) return false
-  const raw = localStorage.getItem(POS_KEY)
+  const raw = readPos()
   if (!raw) return false
   try {
     const { x, y } = JSON.parse(raw) as { x: number; y: number }
@@ -308,6 +326,22 @@ export async function restorePosition(): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/**
+ * 把词板挪回主屏顶部居中 —— 拖出屏幕外之后唯一的找回入口。
+ * 后端负责搬窗口并显形一下，这里把新位置写进记忆，免得下次启动又跳回原地。
+ */
+export async function resetBoardPosition(): Promise<boolean> {
+  if (!isTauri) return false
+  const pos = await call<[number, number] | null>('reset_board_position')
+  if (!Array.isArray(pos) || pos.length !== 2) return false
+  try {
+    localStorage.setItem(POS_KEY, JSON.stringify({ x: pos[0], y: pos[1] }))
+  } catch {
+    /* ignore */
+  }
+  return true
 }
 
 export async function onMoved(cb: () => void): Promise<() => void> {

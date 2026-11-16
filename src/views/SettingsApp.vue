@@ -21,6 +21,7 @@ import {
   openUrl,
   peekBoard,
   quitApp,
+  resetBoardPosition,
   setAlwaysOnTop,
   setAutostart,
   setLocked,
@@ -311,6 +312,11 @@ function toggleLocked(v: boolean) {
   void setLocked(v)
 }
 
+/** 词板被拖到屏幕外面时唯一的救回手段：挪回主屏顶部居中 */
+function resetPos() {
+  void resetBoardPosition()
+}
+
 function close() {
   void closeSettingsWindow()
 }
@@ -529,7 +535,7 @@ onBeforeUnmount(() => {
     <header class="titlebar" @pointerdown="onTitleDown" @dblclick="minimizeSelf">
       <div class="brand">
         <img src="/icon.svg" alt="" class="logo" />
-        <span>歌词板设置</span>
+        <span>LyricsFloat 设置</span>
       </div>
       <div class="wctl">
         <button title="最小化" @click.stop="minimizeSelf">
@@ -641,6 +647,11 @@ onBeforeUnmount(() => {
               />
               <i></i>
             </label>
+            <div class="row">
+              <span class="lbl">词板位置</span>
+              <div class="grow"></div>
+              <button class="mini" @click="resetPos">移回屏幕中央</button>
+            </div>
 
             <h3>设置文件</h3>
             <div class="row">
@@ -655,7 +666,7 @@ onBeforeUnmount(() => {
               <button class="ghost" @click="doExport">导出到桌面</button>
               <button class="ghost" @click="hintImport">导入…</button>
               <button class="ghost" @click="resetSettings">恢复默认</button>
-              <button class="danger" @click="quit">退出歌词板</button>
+              <button class="danger" @click="quit">退出 LyricsFloat</button>
             </div>
           </section>
 
@@ -1028,7 +1039,7 @@ onBeforeUnmount(() => {
               <img src="/icon.svg" alt="" class="about-logo" />
               <div class="about-title">
                 <div class="about-name">
-                  歌词板
+                  LyricsFloat
                   <span class="about-ver">{{ version ? `v${version}` : '—' }}</span>
                 </div>
               </div>

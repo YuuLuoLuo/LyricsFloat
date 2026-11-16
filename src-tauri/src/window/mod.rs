@@ -62,7 +62,7 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     effects::strip_window_border(&win);
     effects::apply_round_region(&win);
     // 不要标题：tao 会给无边框窗口留着 CAPTION 样式位，
-    // DWM 会照着窗口标题在左上角画出"歌词板"三个字
+    // DWM 会照着窗口标题在左上角画出软件名的字
     let _ = win.set_title("");
     effects::set_click_through(&win, true);
     // tao 建窗口时把 WS_CAPTION 一起写进了 GWL_STYLE，这里先摘干净，
@@ -82,6 +82,15 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
         effects::subclass_frameless(&settings_win);
     }
 
+    // 任务管理器 / 任务栏里，每个窗口的图标取的是窗口自己的 WM_SETICON；
+    // 不设就显示 Windows 那个"没有图标"的通用方块，于是同组里图标五花八门。
+    // 统一挂上 exe 里那份资源图标（default_window_icon 在 Windows 上就是它）。
+    for label in ["board", "settings"] {
+        if let Some(w) = app.get_webview_window(label) {
+            apply_window_icon(app, &w);
+        }
+    }
+
     // 前端拿到位置后自己 show；这里兜底，避免前端异常时窗口永远不出现
     {
         let win = win.clone();
@@ -95,6 +104,13 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
 
     hover::spawn(app.clone(), win);
     Ok(())
+}
+
+/// 给窗口挂上 exe 资源里的图标，让任务管理器/任务栏里同一组窗口长得一样
+fn apply_window_icon(app: &AppHandle, win: &WebviewWindow) {
+    if let Some(icon) = app.default_window_icon().cloned() {
+        let _ = win.set_icon(icon);
+    }
 }
 
 fn reveal_on(win: &WebviewWindow) {
@@ -261,4 +277,29 @@ pub fn peek_board(app: AppHandle, ms: u64) {
         reveal_on(&win);
         let _ = app.emit("hover-changed", true);
     }
+}
+
+/// 把词板挪回主屏顶部居中 —— 拖到屏幕外面之后唯一的找回手段。
+/// 顺手显形一下让人看见它落在哪（锁定状态下不打扰），
+/// 返回新的物理坐标，前端拿去覆盖记住的位置。
+#[tauri::command]
+pub fn reset_board_position(app: AppHandle) -> Option<(f64, f64)> {
+    let win = board(&app)?;
+    let mon = win.primary_monitor().ok().flatten()?;
+    let msize = mon.size();
+    let mpos = mon.position();
+    // 拿到的是物理像素，和 set_position 用的是同一套坐标
+    let win_size = win.outer_size().ok()?;
+    let gap = 16.0;
+    let x = (mpos.x as f64 + (msize.width as f64 - win_size.width as f64) / 2.0)
+        .max(mpos.x as f64 + gap);
+    // 竖直方向放屏幕顶部 8% 处，和默认摆放一致
+    let y = mpos.y as f64 + (msize.height as f64 * 0.08).round();
+
+    let pos = tauri::PhysicalPosition::new(x.round() as i32, y.round() as i32);
+    let _ = win.set_position(pos);
+    // set_position 同样会让 tao 重写样式，标题栏再摘一次
+    effects::strip_caption(&win);
+    peek_board(app.clone(), 1600);
+    Some((pos.x as f64, pos.y as f64))
 }

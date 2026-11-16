@@ -23,6 +23,7 @@ pub fn run() {
             window::window_logical_pos,
             window::move_window_logical,
             window::peek_board,
+            window::reset_board_position,
             about::app_version,
             about::open_url,
             about::check_update,
@@ -56,5 +57,5 @@ pub fn run() {
             }
         })
         .run(tauri::generate_context!())
-        .expect("error while running lyric-board");
+        .expect("error while running LyricsFloat");
 }
