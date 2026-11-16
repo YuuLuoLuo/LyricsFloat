@@ -673,6 +673,24 @@ onBeforeUnmount(() => {
             <template v-if="show.card">
               <h3>歌词信息布局</h3>
               <div class="row">
+                <span class="lbl">位置</span>
+                <div class="seg grow">
+                  <button
+                    :class="{ on: settings.info.pos === 'top' }"
+                    @click="settings.info.pos = 'top'"
+                  >
+                    顶部
+                  </button>
+                  <button
+                    :class="{ on: settings.info.pos === 'bottom' }"
+                    @click="settings.info.pos = 'bottom'"
+                  >
+                    底部
+                  </button>
+                </div>
+                <span class="val"></span>
+              </div>
+              <div class="row">
                 <span class="lbl">封面</span>
                 <div class="seg grow">
                   <button
@@ -697,23 +715,29 @@ onBeforeUnmount(() => {
                 <span class="val"></span>
               </div>
               <div class="row">
-                <span class="lbl">标题</span>
+                <span class="lbl">文本位置</span>
                 <div class="seg grow">
                   <button
-                    :class="{ on: settings.info.title === 'top' }"
-                    @click="settings.info.title = 'top'"
+                    :class="{ on: settings.info.text === 'left' }"
+                    @click="settings.info.text = 'left'"
                   >
-                    顶部
+                    左
                   </button>
                   <button
-                    :class="{ on: settings.info.title === 'bottom' }"
-                    @click="settings.info.title = 'bottom'"
+                    :class="{ on: settings.info.text === 'center' }"
+                    @click="settings.info.text = 'center'"
                   >
-                    底部
+                    中
                   </button>
                   <button
-                    :class="{ on: settings.info.title === 'hidden' }"
-                    @click="settings.info.title = 'hidden'"
+                    :class="{ on: settings.info.text === 'right' }"
+                    @click="settings.info.text = 'right'"
+                  >
+                    右
+                  </button>
+                  <button
+                    :class="{ on: settings.info.text === 'hidden' }"
+                    @click="settings.info.text = 'hidden'"
                   >
                     不显示
                   </button>

@@ -105,18 +105,33 @@ const stageDoc = computed(() => runtime.doc)
 /* ------------------------------------------------------------ 歌词信息 */
 
 /**
- * 「显示歌词信息」是独立开关：封面在左、在右或干脆不显示，
- * 标题在顶部、底部或不显示。两者都不显示时就退化成纯歌词，不再占那 46px。
+ * 「显示歌词信息」三项独立：整条在顶部/底部、封面在文字左/右、
+ * 文本在剩余空间里左/中/右。文本隐藏时只剩封面，封面也隐藏时退化成纯歌词。
  */
 const infoOn = computed(() => settings.info.show)
+const cardPos = computed(() => settings.info.pos)
 const cardCover = computed(() => settings.info.cover)
-const cardTitle = computed(() => settings.info.title)
+const cardText = computed(() => settings.info.text)
 const cardHead = computed(
-  () => infoOn.value && (cardCover.value !== 'hidden' || cardTitle.value !== 'hidden'),
+  () => infoOn.value && (cardCover.value !== 'hidden' || cardText.value !== 'hidden'),
 )
 
-/** 标题挪到底部时，锁定按钮也换到右上角，别和底部那行标题/封面挤在一起 */
-const lockOnTop = computed(() => cardHead.value && cardTitle.value === 'bottom')
+/** 没有封面时整块按文本位置对齐 */
+const headStyle = computed(() => {
+  if (cardCover.value !== 'hidden') return {}
+  const t = cardText.value
+  return {
+    justifyContent: t === 'center' ? 'center' : t === 'right' ? 'flex-end' : 'flex-start',
+  }
+})
+
+const metaStyle = computed(() => ({
+  textAlign: cardText.value === 'hidden' ? 'left' : cardText.value,
+}))
+
+
+/** 信息栏挪到底部时，锁定按钮也换到右上角，别和底部那行挤在一起 */
+const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
 </script>
 
 <template>
@@ -132,10 +147,11 @@ const lockOnTop = computed(() => cardHead.value && cardTitle.value === 'bottom')
       <div
         v-if="cardHead"
         class="card-head"
-        :class="[`title-${cardTitle}`, `cover-${cardCover}`]"
+        :class="[`pos-${cardPos}`, `cover-${cardCover}`]"
+        :style="headStyle"
       >
         <div v-if="cardCover !== 'hidden'" class="cover"></div>
-        <div v-if="cardTitle !== 'hidden'" class="meta">
+        <div v-if="cardText !== 'hidden'" class="meta" :style="metaStyle">
           <div class="title">{{ runtime.trackTitle || '未在播放' }}</div>
           <div class="artist">{{ runtime.trackArtist || '等待播放器' }}</div>
         </div>
@@ -233,24 +249,18 @@ const lockOnTop = computed(() => cardHead.value && cardTitle.value === 'bottom')
   position: relative;
 }
 
-/* 标题在底部时，头部排到舞台后面去（顺序反转，不挪 DOM） */
-.card-head.title-bottom {
+/* 信息栏在底部时，整块排到舞台后面去（顺序反转，不挪 DOM） */
+.card-head.pos-bottom {
   order: 2;
 }
 
-/* 封面在右：反转主轴再贴右端，就是 [标题][封面] */
+/* 封面在右：反转主轴，就是 [文本][封面] */
 .card-head.cover-right {
   flex-direction: row-reverse;
-  justify-content: flex-start;
 }
 
 .card-head.cover-left {
   justify-content: flex-start;
-}
-
-.card-head.cover-hidden {
-  justify-content: center;
-  text-align: center;
 }
 
 .card-head {

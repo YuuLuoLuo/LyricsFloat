@@ -54,10 +54,12 @@ export interface AppSettings {
   /** 歌词信息：词板上的曲名与封面 */
   info: {
     show: boolean
-    /** 封面位置：左右两侧，或干脆不显示 */
+    /** 信息栏位置：词板顶部 / 底部 */
+    pos: 'top' | 'bottom'
+    /** 封面位置：文字左侧 / 右侧，或不显示 */
     cover: 'left' | 'right' | 'hidden'
-    /** 标题位置：词板顶部 / 底部，或不显示（纯歌词） */
-    title: 'top' | 'bottom' | 'hidden'
+    /** 文本位置：曲名歌手在剩余空间里左 / 中 / 右对齐，或不显示 */
+    text: 'left' | 'center' | 'right' | 'hidden'
   }
   lyric: {
     offsetMs: number
@@ -89,7 +91,7 @@ export const DEFAULTS: AppSettings = {
   view: { rotate: false, translation: false, karaoke: false },
   glass: { tint: '#14141a', alpha: 0.42 },
   behavior: { autostart: false, alwaysOnTop: true, locked: false },
-  info: { show: false, cover: 'left', title: 'top' },
+  info: { show: false, pos: 'top', cover: 'left', text: 'left' },
   lyric: { offsetMs: 0 },
 }
 
@@ -113,13 +115,31 @@ function migrate(raw: Record<string, unknown>): Record<string, unknown> {
   view.karaoke = mode === 'karaoke' || mode === 'duet'
   raw.info = {
     show: mode === 'card',
+    pos: card.title === 'bottom' ? 'bottom' : 'top',
     cover: card.cover ?? 'left',
-    title: card.title ?? 'top',
+    text: card.title === 'hidden' ? 'hidden' : 'left',
   }
   delete view.mode
   delete view.showTranslation
   delete raw.card
   return raw
+}
+
+/**
+ * 旧版「歌词信息」只有 title = top/bottom/hidden 一项，且改它会连封面一起
+ * 整条搬走。现在拆成三项：位置（整条上/下）、封面（左/右/无）、
+ * 文本位置（左/中/右/无）。
+ *
+ * 迁移按原语义走：title=bottom -> 位置在底部；title=hidden 原意是
+ * "不要文字只留封面"，对应 文本位置=不显示。
+ */
+function fixInfo(raw: Record<string, unknown>): void {
+  const info = raw.info as Record<string, unknown> | undefined
+  if (!info || typeof info.title !== 'string') return
+  const t = info.title
+  info.pos = t === 'bottom' ? 'bottom' : 'top'
+  info.text = t === 'hidden' ? 'hidden' : 'left'
+  delete info.title
 }
 
 /**
@@ -144,7 +164,9 @@ function prune(base: unknown, val: unknown): unknown {
 /** 外部来的设置（存盘 / 导入）统一走：迁移 -> 按形状重建 -> 收敛旧数值 */
 function adopt(raw: unknown): AppSettings {
   const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
-  return tame(prune(DEFAULTS, migrate(obj)) as AppSettings)
+  const migrated = migrate(obj)
+  fixInfo(migrated)
+  return tame(prune(DEFAULTS, migrated) as AppSettings)
 }
 
 /**
@@ -255,6 +277,8 @@ export interface Runtime {
   trackTitle: string
   trackArtist: string
   trackAlbum: string
+  /** 当前曲目封面（data URL），取不到时为空串 */
+  trackCover: string
   source: string
   /** 没有播放器 / 找不到歌词时的提示 */
   notice: string
@@ -275,6 +299,7 @@ export const runtime = reactive<Runtime>({
   trackTitle: '',
   trackArtist: '',
   trackAlbum: '',
+  trackCover: '',
   source: '',
   notice: '',
   menuOpen: false,
