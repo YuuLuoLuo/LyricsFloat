@@ -376,7 +376,7 @@ mod imp {
     /// 子类化标识："LYRB"
     const SUBCLASS_ID: usize = 0x4C59_5242;
 
-    /// 窗口过程：拦截 WM_NCCALCSIZE，整窗即客户区。
+    /// 窗口过程：拦截所有非客户区消息，整窗即客户区。
     /// 其余消息原样走默认处理，不动 tao / WebView2 的任何逻辑。
     unsafe extern "system" fn frameless_proc(
         hwnd: HWND,
@@ -388,13 +388,22 @@ mod imp {
     ) -> windows::Win32::Foundation::LRESULT {
         use windows::Win32::Foundation::LRESULT;
         use windows::Win32::UI::Shell::DefSubclassProc;
-        use windows::Win32::UI::WindowsAndMessaging::WM_NCCALCSIZE;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_NCPAINT,
+        };
 
-        if msg == WM_NCCALCSIZE {
-            // wParam=TRUE: lParam 是 NCCALCSIZE_PARAMS*，返回 0 = 提出的新窗口矩形
-            // 整个都算客户区。wParam=FALSE: lParam 是 RECT*，返回 0 = 矩形不变。
-            // 两种情况都是"没有非客户区"。
-            return LRESULT(0);
+        match msg {
+            // 整窗都是客户区：没有非客户区，DWM 无处画标题栏/边框
+            WM_NCCALCSIZE => return LRESULT(0),
+            // 窗口激活/失活时，DefWindowProc 会重画标题栏（激活色/失活色）。
+            // 返回 TRUE = "我处理了"，阻止默认的标题栏重绘。
+            WM_NCACTIVATE => return LRESULT(1),
+            // 非客户区绘制：不要画任何东西
+            WM_NCPAINT => return LRESULT(0),
+            // 命中测试：整窗都是客户区。WS_EX_TRANSPARENT（穿透）在更上层拦，
+            // 不会走到这里。
+            WM_NCHITTEST => return LRESULT(1), // HTCLIENT
+            _ => {}
         }
         DefSubclassProc(hwnd, msg, wparam, lparam)
     }
