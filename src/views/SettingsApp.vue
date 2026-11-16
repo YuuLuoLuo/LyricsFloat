@@ -999,9 +999,9 @@ onBeforeUnmount(() => {
               </div>
             </template>
 
-            <h3>玻璃背景</h3>
+            <h3>背景样式</h3>
             <div class="row">
-              <span class="lbl">浓度</span>
+              <span class="lbl">不透明度</span>
               <input
                 v-model.number="settings.glass.alpha"
                 class="range"
