@@ -10,9 +10,13 @@ use serde::{Deserialize, Serialize};
 
 const UA: &str = "lyric-board-update-check";
 
-/// 版本号：年份.月份_当月第几次编译（例如 `2026.11_3`）。
+/// 版本号：年份后两位.月份_当月第几次编译（例如 `26.11_3`）。
 /// 发 GitHub Release 时 tag 用同一个字符串（带不带 v 前缀都认）。
-pub const APP_VERSION: &str = "2026.11_1";
+///
+/// 注意：exe 的文件属性（ProductVersion / FileVersion）走的是资源格式里
+/// 的数字四段，写不了下划线，所以 Cargo.toml / tauri.conf.json 里同步写成
+/// `26.11.2`（点号版，语义完全一样），下面 `version_matches_cargo` 测试守着两边不走样。
+pub const APP_VERSION: &str = "26.11_2";
 
 #[derive(Serialize, Deserialize)]
 pub struct UpdateInfo {
@@ -149,8 +153,8 @@ fn fetch_latest(repo: &str) -> Result<UpdateInfo, String> {
     })
 }
 
-/// 版本号按「年份.月份_第几次编译」比：`2026.11_3` -> [2026, 11, 3]。
-/// 也兼容老式的 `0.2.0`，tag 前缀 v 忽略。
+/// 版本号按「年份.月份_第几次编译」比：`26.11_3` -> [26, 11, 3]。
+/// 也兼容点号写法和老式的 `0.2.0`，tag 前缀 v 忽略。
 fn parse_ver(s: &str) -> Vec<u64> {
     let t = s.trim().trim_start_matches(['v', 'V']);
     let mut out = Vec::new();
@@ -195,9 +199,8 @@ fn tidy_notes(body: &str) -> String {
             '[' => {
                 // 吃掉 [text](url) 里的 (url)：遇到 ']' 且下一个是 '(' 就跳过整个括号
                 let mut text = String::new();
-                let mut depth = 0usize;
                 while let Some(&n) = chars.peek() {
-                    if n == ']' && depth == 0 {
+                    if n == ']' {
                         chars.next();
                         break;
                     }
@@ -246,14 +249,26 @@ mod tests {
     #[test]
     fn compares_versions() {
         // 年份.月份_第几次编译
-        assert!(is_newer("2026.11_2", "2026.11_1"));
-        assert!(!is_newer("2026.11_1", "2026.11_1"));
-        assert!(!is_newer("2026.11_1", "2026.11_2"));
-        assert!(is_newer("v2026.12_1", "2026.11_9"));
+        assert!(is_newer("26.11_2", "26.11_1"));
+        assert!(!is_newer("26.11_1", "26.11_1"));
+        assert!(!is_newer("26.11_1", "26.11_2"));
+        assert!(is_newer("v26.12_1", "26.11_9"));
+        assert!(is_newer("27.1_1", "26.12_9"));
         assert!(is_newer("2027.1_1", "2026.12_9"));
+        // 点号版（exe 文件属性那种写法）和带下划线的等价
+        assert!(!is_newer("26.11.2", "26.11_2"));
         // 老式语义仍然可用
         assert!(is_newer("0.3.0", "0.2.9"));
-        assert!(!is_newer("", "2026.11_1"));
+        assert!(!is_newer("", "26.11_1"));
+    }
+
+    /// APP_VERSION 和 Cargo.toml 的 package.version 必须对得上，
+    /// 否则"关于"页显示 26.11_2、exe 属性却是别的数，发版时容易搞错。
+    #[test]
+    fn version_matches_cargo() {
+        let cargo = env!("CARGO_PKG_VERSION"); // 例如 "26.11.2"
+        let dotted = APP_VERSION.replace('_', ".");
+        assert_eq!(cargo, dotted, "请同步修改 src-tauri/Cargo.toml 的 version");
     }
 
     #[test]
