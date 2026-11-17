@@ -4,8 +4,16 @@
 
 透明、无边框、始终置顶，鼠标穿透。歌词跟着系统里正在播放的歌实时滚动，
 
-![平台](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D7)
-![许可](https://img.shields.io/badge/license-MIT-green)
+<p align="center">
+  <a href="https://github.com/YuuLuoLuo/LyricsFloat/releases/latest">
+    <img alt="下载最新版" src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD%E6%9C%80%E6%96%B0%E7%89%88-Windows%20x64-2ea44f?style=for-the-badge&logo=windows&logoColor=white">
+  </a>
+</p>
+
+<p align="center">
+  <img alt="平台" src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078D7">
+  <img alt="许可" src="https://img.shields.io/badge/license-MIT-green">
+</p>
 
 ---
 
@@ -44,9 +52,17 @@
 
 ## 下载与安装
 
-1. 到 [Releases](https://github.com/YuuLuoLuo/LyricsFloat/releases) 下载最新版 `LyricsFloat_<版本号>.exe`（例如 `LyricsFloat_26.11_6.exe`）。
-2. 放到任意目录双击运行即可，**绿色免安装**，不写注册表（只有开启「开机自动启动」时写一条自启项）。
-3. 首次运行会在 `%APPDATA%\com.yuluo.lyricsfloat\` 生成配置与歌词缓存，卸载时删除该目录即可。
+<p align="center">
+  <a href="https://github.com/YuuLuoLuo/LyricsFloat/releases/latest">
+    <img alt="前往 Releases 下载" src="https://img.shields.io/badge/%E5%89%8D%E5%BE%80%20Releases-LyricsFloat%20%E6%9C%80%E6%96%B0%E7%89%88-2ea44f?style=for-the-badge&logo=github&logoColor=white">
+  </a>
+</p>
+
+点上面的按钮（或直接打开 [Releases](https://github.com/YuuLuoLuo/LyricsFloat/releases/latest)），
+下载最新版 `LyricsFloat_<版本号>.exe`（例如 `LyricsFloat_26.11_6.exe`）。
+
+1. 放到任意目录双击运行即可，**绿色免安装**，不写注册表（只有开启「开机自动启动」时写一条自启项）。
+2. 首次运行会在 `%APPDATA%\com.yuluo.lyricsfloat\` 生成配置与歌词缓存，卸载时删除该目录即可。
 
 > 如果你的电脑没装 WebView2
 > [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
