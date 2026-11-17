@@ -277,7 +277,8 @@ function lineStyle(index: number) {
   // 只露半个字的行会在窗口边缘拖出一条模糊的亮边（看着就像一条白色虚线）。
   // 干脆整行不画：这些行本来就是淡出/模糊的上下文，少一行没有观感损失。
   const top = index * rowH.value + railY.value
-  if (top < -0.5 || top + rowH.value > stageHeight.value + 0.5) {
+  // 窗口矮到连一整行都放不下时不做这个裁决，否则整块会空白
+  if (stageHeight.value >= rowH.value && (top < -0.5 || top + rowH.value > stageHeight.value + 0.5)) {
     look.visible = false
   }
   return {
