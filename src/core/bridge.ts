@@ -23,6 +23,7 @@ async function call<T = unknown>(cmd: string, args?: Record<string, unknown>): P
     return await invoker<T>(cmd, args)
   } catch (err) {
     console.warn(`[bridge] ${cmd} failed`, err)
+    void logLine('WARN', `命令失败：${cmd} → ${String(err)}`)
     return null
   }
 }
@@ -279,6 +280,37 @@ export async function minimizeSelf(): Promise<void> {
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * 前端日志：Rust 那边看不到界面层的失败（IPC、解析、DOM），
+ * 统一走这个命令写进同一份内存日志。
+ */
+export async function logLine(level: 'INFO' | 'WARN' | 'ERROR', msg: string): Promise<void> {
+  if (!isTauri) return
+  try {
+    const mod = await import('@tauri-apps/api/core')
+    await mod.invoke('log_line', { level, msg })
+  } catch {
+    /* 记日志失败就沉默，绝不递归 */
+  }
+}
+
+/** 导出内存日志到软件目录，返回写出的路径（失败返回空串） */
+export async function exportLog(): Promise<string> {
+  if (!isTauri) return ''
+  try {
+    const mod = await import('@tauri-apps/api/core')
+    return (await mod.invoke<string>('export_log')) || ''
+  } catch (err) {
+    console.warn('[bridge] export_log failed', err)
+    return ''
+  }
+}
+
+/** 无播放时自动隐藏：true = 把词板窗口整个藏起来 */
+export async function setBoardParked(parked: boolean): Promise<void> {
+  await call('set_board_parked', { parked })
 }
 
 const POS_KEY = 'lyricsfloat.pos'

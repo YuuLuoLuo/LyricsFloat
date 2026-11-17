@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
-use super::{effects, now_ms, GLASS_COLOR, LOCKED, PEEK_UNTIL, REVEALED};
+use super::{effects, now_ms, GLASS_COLOR, LOCKED, PARKED, PEEK_UNTIL, REVEALED};
 
 /// 16ms ≈ 60Hz。鼠标穿透时 WebView 收不到 mousemove，只能读全局光标。
 const TICK_MS: u64 = 16;
@@ -21,6 +21,13 @@ pub fn spawn(app: AppHandle, win: WebviewWindow) {
 
         loop {
             thread::sleep(Duration::from_millis(TICK_MS));
+
+            // 「无播放时自动隐藏」期间窗口是 hide 状态，什么都别碰：
+            // 既不该显形，也省掉每拍的样式读写
+            if PARKED.load(Ordering::Relaxed) {
+                leave_ticks = 0;
+                continue;
+            }
 
             // 兜底：只要有谁把 WS_CAPTION 塞回窗口样式（tao 在 set_size /
             // set_always_on_top / show 之后都会整份重写一次），就地摘掉。

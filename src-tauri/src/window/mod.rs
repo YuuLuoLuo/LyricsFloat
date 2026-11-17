@@ -11,6 +11,9 @@ pub(crate) static LOCKED: AtomicBool = AtomicBool::new(false);
 pub(crate) static REVEALED: AtomicBool = AtomicBool::new(false);
 /// 玻璃底色，AABBGGRR（SCA 要的是 ABGR 顺序）
 pub(crate) static GLASS_COLOR: AtomicU32 = AtomicU32::new(0x9E_1E1A1A);
+/// 「无播放时自动隐藏」：词板整个窗口藏起来，连透明的那层都不参与。
+/// 和 LOCKED 的区别是锁定时窗口还在（只是隐形），这个是彻底 hide()。
+pub(crate) static PARKED: AtomicBool = AtomicBool::new(false);
 /// 临时显形的截止时刻（epoch ms）。设置页拖宽高时反复刷新，
 /// 悬停轮询看到还没过期就不收起 —— 调尺寸时能看清面板的边界。
 pub(crate) static PEEK_UNTIL: AtomicU64 = AtomicU64::new(0);
@@ -102,6 +105,7 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
         });
     }
 
+    crate::logbuf::info("窗口就绪：board + settings");
     hover::spawn(app.clone(), win);
     Ok(())
 }
@@ -114,12 +118,14 @@ fn apply_window_icon(app: &AppHandle, win: &WebviewWindow) {
 }
 
 fn reveal_on(win: &WebviewWindow) {
+    crate::logbuf::info("悬停显形");
     effects::enable_glass(win, GLASS_COLOR.load(Ordering::Relaxed));
     effects::set_click_through(win, false);
     effects::strip_caption(win);
 }
 
 fn reveal_off(win: &WebviewWindow) {
+    crate::logbuf::info("悬停收起");
     effects::disable_glass(win);
     effects::set_click_through(win, true);
     effects::strip_caption(win);
@@ -131,6 +137,7 @@ pub fn toggle_lock(app: &AppHandle) {
 }
 
 pub fn set_lock_state(app: &AppHandle, next: bool) {
+    crate::logbuf::info(if next { "锁定词板" } else { "解锁词板" });
     LOCKED.store(next, Ordering::Relaxed);
     if next {
         REVEALED.store(false, Ordering::Relaxed);
@@ -211,6 +218,7 @@ pub fn open_settings(app: AppHandle) {
         return;
     };
     // 刻意不动词板的显形状态：设置页开着不等于词板在悬停
+    crate::logbuf::info("打开设置");
     let _ = win.show();
     // show 会让 tao 重写一次窗口样式，标题栏样式要再摘一次
     effects::strip_caption(&win);
@@ -269,13 +277,35 @@ pub fn move_window_logical(win: WebviewWindow, x: f64, y: f64) {
 #[tauri::command]
 pub fn peek_board(app: AppHandle, ms: u64) {
     PEEK_UNTIL.store(now_ms() + ms.min(5000), Ordering::Relaxed);
-    if is_locked() {
+    if is_locked() || PARKED.load(Ordering::Relaxed) {
         return;
     }
     let Some(win) = board(&app) else { return };
     if !REVEALED.swap(true, Ordering::Relaxed) {
         reveal_on(&win);
         let _ = app.emit("hover-changed", true);
+    }
+}
+
+/// 「无播放时自动隐藏」的落地：true = 整个窗口藏起来（连隐形层都不占）。
+/// 锁定时窗口本来就不可见，这里只是把 show/hide 对上去。
+#[tauri::command]
+pub fn set_board_parked(app: AppHandle, parked: bool) {
+    PARKED.store(parked, Ordering::Relaxed);
+    let Some(win) = board(&app) else { return };
+    if parked {
+        if REVEALED.swap(false, Ordering::Relaxed) {
+            let _ = app.emit("hover-changed", false);
+        }
+        // 先关掉玻璃再藏，免得下次 show 时闪一帧亚克力
+        effects::disable_glass(&win);
+        let _ = win.hide();
+        crate::logbuf::info("词板已隐藏（无播放/无歌词）");
+    } else {
+        let _ = win.show();
+        effects::strip_caption(&win);
+        apply_window_icon(&app, &win);
+        crate::logbuf::info("词板恢复显示");
     }
 }
 
@@ -296,6 +326,7 @@ pub fn reset_board_position(app: AppHandle) -> Option<(f64, f64)> {
     // 竖直方向放屏幕顶部 8% 处，和默认摆放一致
     let y = mpos.y as f64 + (msize.height as f64 * 0.08).round();
 
+    crate::logbuf::info(&format!("词板位置重置 → ({:.0}, {:.0})", x, y));
     let pos = tauri::PhysicalPosition::new(x.round() as i32, y.round() as i32);
     let _ = win.set_position(pos);
     // set_position 同样会让 tao 重写样式，标题栏再摘一次

@@ -96,6 +96,7 @@ async function loadLyric(np: NowPlaying): Promise<void> {
       runtime.doc = null
       runtime.source = ''
       runtime.notice = `没有找到《${np.title}》的歌词`
+      void logLine('WARN', `歌词为空：${np.title} - ${np.artist}`)
       return
     }
 
@@ -103,6 +104,10 @@ async function loadLyric(np: NowPlaying): Promise<void> {
     runtime.doc = buildDoc()
     runtime.source = payload.source
     runtime.notice = runtime.doc ? '' : '歌词内容为空'
+    void logLine(
+      'INFO',
+      `歌词已装载：${np.title}（${payload.source}，${runtime.doc?.lines.length ?? 0} 行）`,
+    )
   } finally {
     if (token === loadToken) runtime.loading = false
   }
@@ -255,13 +260,6 @@ export async function initPlayer(): Promise<() => void> {
       runtime.notice = '暂无播放中的媒体'
     },
   })
-
-  // 3 秒内没有任何播放器信息，给一句提示而不是空白
-  setTimeout(() => {
-    if (!runtime.doc && !currentKey && !runtime.notice) {
-      runtime.notice = '在任意播放器里开始播放音乐'
-    }
-  }, 3000)
 
   // 事件只推变化：窗口刚起来时先拉一次快照，别等下一次换歌
   void getNowPlaying().then((np) => {

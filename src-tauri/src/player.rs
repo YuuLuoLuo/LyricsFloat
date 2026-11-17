@@ -106,6 +106,10 @@ pub fn spawn(app: AppHandle) {
                     let key = format!("{}\u{1}{}", np.title, np.artist);
                     if key != last_key {
                         last_key = key.clone();
+                        crate::logbuf::info(&format!(
+                            "换曲：{} - {}（{}s，source=SMTC）",
+                            np.title, np.artist, np.duration.round() as i64
+                        ));
                         let _ = app.emit("track-changed", &np);
                     }
                     let _ = app.emit("player-tick", &np);
@@ -115,6 +119,7 @@ pub fn spawn(app: AppHandle) {
                         was_alive = false;
                         last_key.clear();
                         store(None);
+                        crate::logbuf::info("播放已停止（读不到会话）");
                         let _ = app.emit("player-stopped", ());
                     }
                 }

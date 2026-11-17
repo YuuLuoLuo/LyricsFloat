@@ -13,6 +13,7 @@ import {
   appVersion,
   checkUpdate,
   closeSettingsWindow,
+  exportLog,
   getAutostart,
   isTauri,
   listFonts,
@@ -67,10 +68,21 @@ const tab = ref<(typeof TABS)[number]['id']>('general')
  * 让空会把这一句整个顶出去 —— 所以预览把时间夹在这一句之内，
  * 永远按"正在唱"的样子渲染。这里看的是排版，不是播放进度。
  */
+/** 没在播放时预览用的示例文本：按当前样式排满三行，字体字号照样能看出来 */
+const PREVIEW_TEXT = '这是一行示例文本'
+
 const previewDoc = computed<{ lines: LyricLine[]; time: number } | null>(() => {
   const doc = runtime.doc
   const n = doc?.lines.length ?? 0
-  if (!doc || !n) return null
+  if (!doc || !n) {
+    const lines: LyricLine[] = [0, 1, 2].map((i) => ({
+      start: i * 10_000,
+      end: i * 10_000 + 8_000,
+      text: PREVIEW_TEXT,
+    }))
+    // 时间落在中间那一行，三行里中间是"当前句"，上下两行是上下文
+    return { lines, time: 11_000 }
+  }
   const i = findLineIndex(doc.lines, runtime.time)
   // 预览要同时看到上下文：取一句当"当前句"，前后各带一行，共三行。
   // 首尾句没有邻居时往里收一格，保证永远有三行可看。
@@ -304,6 +316,23 @@ async function toggleAlwaysOnTop(v: boolean) {
   settings.behavior.alwaysOnTop = v
   saveSettings()
   void setAlwaysOnTop(v)
+}
+
+/** 开了「无播放时自动隐藏」= 词板可能整个不在，尺寸/背景这些项就没意义了 */
+const parkMode = computed(() => settings.behavior.hideWhenIdle)
+
+function toggleHideWhenIdle(v: boolean) {
+  settings.behavior.hideWhenIdle = v
+  saveSettings()
+}
+
+async function doExportLog(): Promise<void> {
+  if (!isTauri) {
+    say('浏览器预览里没有日志')
+    return
+  }
+  const path = await exportLog()
+  say(path ? `已导出：${path}` : '导出失败，请重试')
 }
 
 function toggleLocked(v: boolean) {
@@ -647,6 +676,18 @@ onBeforeUnmount(() => {
               />
               <i></i>
             </label>
+            <label class="switch">
+              <span class="lbl">无播放时自动隐藏</span>
+              <input
+                type="checkbox"
+                :checked="settings.behavior.hideWhenIdle"
+                @change="toggleHideWhenIdle(($event.target as HTMLInputElement).checked)"
+              />
+              <i></i>
+            </label>
+            <p v-if="settings.behavior.hideWhenIdle" class="hint">
+              词板已隐藏：没有播放、或当前媒体没有歌词时都不显示。调整尺寸与背景前请先关闭此开关。
+            </p>
             <div class="row">
               <span class="lbl">词板位置</span>
               <div class="grow"></div>
@@ -667,6 +708,12 @@ onBeforeUnmount(() => {
               <button class="ghost" @click="hintImport">导入…</button>
               <button class="ghost" @click="resetSettings">恢复默认</button>
               <button class="danger" @click="quit">退出 LyricsFloat</button>
+            </div>
+
+            <h3>日志</h3>
+            <p class="hint">日志只存在内存里，退出即清空；导出时才会在软件目录生成文件。</p>
+            <div class="danger-zone">
+              <button class="ghost" @click="doExportLog">导出日志</button>
             </div>
           </section>
 
@@ -775,6 +822,8 @@ onBeforeUnmount(() => {
             </template>
 
             <h3>词板尺寸</h3>
+            <p v-if="parkMode" class="hint">已开启「无播放时自动隐藏」，先关掉开关再调尺寸。</p>
+            <div class="dimmed" :class="{ on: parkMode }">
             <div class="row">
               <span class="lbl">宽度</span>
               <input
@@ -802,6 +851,7 @@ onBeforeUnmount(() => {
             <div class="row">
               <span class="lbl">可显示</span>
               <div class="grow muted">当前可显示 {{ capacity }} 行歌词</div>
+            </div>
             </div>
 
             <h3>字体</h3>
@@ -1011,6 +1061,8 @@ onBeforeUnmount(() => {
             </template>
 
             <h3>背景样式</h3>
+            <p v-if="parkMode" class="hint">词板隐藏时看不到背景，先关掉开关再调。</p>
+            <div class="dimmed" :class="{ on: parkMode }">
             <div class="row">
               <span class="lbl">不透明度</span>
               <input
@@ -1030,6 +1082,7 @@ onBeforeUnmount(() => {
                 <em>{{ settings.glass.tint }}</em>
               </button>
               <span class="val"></span>
+            </div>
             </div>
           </section>
 
@@ -1057,7 +1110,7 @@ onBeforeUnmount(() => {
               {{ updateState.text }}
             </p>
             <div v-if="updateState.url" class="update-actions">
-              <button class="ghost" @click="openLink(updateState.url)">打开发布页</button>
+              <button class="primary" @click="openLink(updateState.url)">前往下载</button>
             </div>
             <pre v-if="updateState.notes" class="notes">{{ updateState.notes }}</pre>
             <p v-if="!repoUrl" class="hint">仓库还没发布，暂时无法检查更新。</p>
@@ -1612,6 +1665,35 @@ section > h3:first-child {
 .danger:hover {
   background: rgba(255, 92, 92, 0.16);
   color: #ffb3b3;
+}
+
+/* 「前往下载」这种主操作：只有它在更新提示里出现，稍微显眼一点 */
+.primary {
+  height: 30px;
+  padding: 0 15px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid rgba(127, 212, 255, 0.42);
+  background: rgba(127, 212, 255, 0.16);
+  color: #cfeeff;
+}
+
+.primary:hover {
+  background: rgba(127, 212, 255, 0.26);
+  color: #fff;
+}
+
+/* 词板隐藏时这些分组没有意义：整组压暗并吃掉鼠标事件（防止误拖滑块） */
+.dimmed {
+  transition: opacity 160ms ease;
+}
+
+.dimmed.on {
+  opacity: 0.32;
+  pointer-events: none;
+  user-select: none;
 }
 
 .toast {

@@ -1,6 +1,7 @@
 mod about;
 mod autostart;
 mod fonts;
+mod logbuf;
 mod lyrics;
 mod player;
 mod settings_io;
@@ -24,9 +25,12 @@ pub fn run() {
             window::move_window_logical,
             window::peek_board,
             window::reset_board_position,
+            window::set_board_parked,
             about::app_version,
             about::open_url,
             about::check_update,
+            logbuf::export_log,
+            logbuf::log_line,
             autostart::get_autostart,
             autostart::set_autostart,
             lyrics::fetch_lyric,
@@ -40,6 +44,14 @@ pub fn run() {
             settings_io::settings_import_file,
         ])
         .setup(|app| {
+            logbuf::info(&format!(
+                "启动 LyricsFloat {}，exe={}",
+                about::APP_VERSION,
+                std::env::current_exe()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| "未知".into())
+            ));
+            logbuf::info(&format!("设置文件：{}", settings_io::settings_path_cmd()));
             window::setup(app.handle())?;
             tray::setup(app.handle())?;
             player::spawn(app.handle().clone());

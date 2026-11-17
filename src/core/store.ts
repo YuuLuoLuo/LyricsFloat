@@ -50,6 +50,8 @@ export interface AppSettings {
     autostart: boolean
     alwaysOnTop: boolean
     locked: boolean
+    /** 无播放 / 当前媒体没有歌词时，把词板整个窗口藏起来 */
+    hideWhenIdle: boolean
   }
   /** 歌词信息：词板上的曲名与封面 */
   info: {
@@ -90,7 +92,7 @@ export const DEFAULTS: AppSettings = {
   },
   view: { rotate: false, translation: false, karaoke: false },
   glass: { tint: '#14141a', alpha: 0.42 },
-  behavior: { autostart: false, alwaysOnTop: true, locked: false },
+  behavior: { autostart: false, alwaysOnTop: true, locked: false, hideWhenIdle: false },
   info: { show: false, pos: 'top', cover: 'left', text: 'left' },
   lyric: { offsetMs: 0 },
 }

@@ -37,12 +37,20 @@ pub async fn fetch_lyric(
 fn fetch_sync(title: &str, artist: &str, duration: f64) -> Option<LyricResult> {
     let key = cache_key(title, artist);
     if let Some(hit) = read_cache(&key) {
+        crate::logbuf::info(&format!("歌词命中缓存：{title} - {artist}（{}）", hit.source));
         return Some(hit);
     }
 
     let found = from_netease(title, artist, duration).or_else(|| from_lrclib(title, artist, duration));
-    if let Some(ref r) = found {
-        write_cache(&key, r);
+    match &found {
+        Some(r) => {
+            crate::logbuf::info(&format!(
+                "歌词匹配成功：{title} - {artist} → {} / {}（{}）",
+                r.matched_title, r.matched_artist, r.source
+            ));
+            write_cache(&key, r);
+        }
+        None => crate::logbuf::warn(&format!("歌词匹配失败：{title} - {artist}")),
     }
     found
 }

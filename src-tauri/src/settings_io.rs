@@ -149,7 +149,10 @@ pub fn settings_save(json: String) -> String {
     };
     match atomic_write(&path, &json) {
         Ok(()) => path.to_string_lossy().to_string(),
-        Err(_) => String::new(),
+        Err(e) => {
+            crate::logbuf::error(&format!("设置写入失败：{e}"));
+            String::new()
+        }
     }
 }
 
@@ -206,7 +209,8 @@ fn desktop_dir() -> Option<PathBuf> {
 }
 
 /// 本地时间戳 YYYYMMDD-HHMM，纯手算避免为一个文件名引入 chrono。
-fn timestamp() -> String {
+/// 日志导出也用它命名，所以是 pub(crate)。
+pub(crate) fn timestamp() -> String {
     #[cfg(target_os = "windows")]
     {
         use windows::Win32::System::SystemInformation::GetLocalTime;
