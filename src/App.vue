@@ -10,6 +10,7 @@ import {
   listenNative,
   restorePosition,
   setBoardParked,
+  setPlayerPref,
   showSelf,
   applyBoard,
   setLocked,
@@ -34,7 +35,7 @@ function loop(now: number) {
 }
 
 /**
- * 无播放时自动隐藏。
+ * 无播放时关闭词板。
  *
  * 判定用 `runtime.doc`：没有播放器、或者拿到歌但没匹配到歌词，都是 null，
  * 两种情况都该把窗口收起来（用户要的就是"没东西看的时候别占着"）。
@@ -74,6 +75,12 @@ watch(
 
 watch(() => [settings.behavior.hideWhenIdle, !!runtime.doc], syncPark)
 
+// 歌词来源：词板窗口也推一次，保证「只开词板、不打开设置」时偏好同样生效
+watch(
+  () => settings.lyric.player,
+  (v) => void setPlayerPref(v),
+)
+
 onMounted(async () => {
   raf = requestAnimationFrame(loop)
   // 先把磁盘上的设置接上（首次运行会顺手落一份），再拿尺寸去开窗口
@@ -100,6 +107,7 @@ onMounted(async () => {
       off()
     }
 
+    await setPlayerPref(settings.lyric.player)
     await applyBoard(settings)
     await setAlwaysOnTop(settings.behavior.alwaysOnTop)
     if (settings.behavior.locked) await setLocked(true)

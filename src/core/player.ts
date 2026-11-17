@@ -10,12 +10,13 @@
 
 import { clock } from './clock'
 import { runtime, settings, isTauriEnv } from './store'
-import { fetchLyric, getNowPlaying, listenNative, getCover } from './bridge'
+import { fetchLyric, getNowPlaying, listenNative, getCover, logLine } from './bridge'
 import { parseLyric, mergeTranslation } from './parser'
 import { buildDemoLyric, DEMO_TRACK } from './demo'
 import type { LyricDoc } from './types'
 
 interface NowPlaying {
+  app?: string
   title: string
   artist: string
   album: string
@@ -82,6 +83,7 @@ async function loadLyric(np: NowPlaying): Promise<void> {
   runtime.trackTitle = np.title
   runtime.trackArtist = np.artist
   runtime.trackAlbum = np.album
+  runtime.trackApp = np.app ?? ''
   runtime.trackCover = ''
   runtime.notice = ''
   runtime.loading = true
@@ -255,6 +257,7 @@ export async function initPlayer(): Promise<() => void> {
       runtime.playing = false
       runtime.trackTitle = ''
       runtime.trackArtist = ''
+      runtime.trackApp = ''
       runtime.trackCover = ''
       runtime.source = ''
       runtime.notice = '暂无播放中的媒体'

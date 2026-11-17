@@ -308,7 +308,25 @@ export async function exportLog(): Promise<string> {
   }
 }
 
-/** 无播放时自动隐藏：true = 把词板窗口整个藏起来 */
+/** 系统里所有能读到播放信息的播放器 */
+export interface PlayerInfo {
+  id: string
+  name: string
+  playing: boolean
+}
+
+export async function listPlayers(): Promise<PlayerInfo[]> {
+  if (!isTauri) return []
+  const res = await call<PlayerInfo[]>('list_players')
+  return res ?? []
+}
+
+/** 指定歌词来源播放器；空串 = 自动 */
+export async function setPlayerPref(id: string): Promise<void> {
+  await call('set_player_pref', { id })
+}
+
+/** 无播放时关闭词板：true = 把词板窗口整个藏起来 */
 export async function setBoardParked(parked: boolean): Promise<void> {
   await call('set_board_parked', { parked })
 }

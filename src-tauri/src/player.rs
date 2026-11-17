@@ -20,6 +20,11 @@ const EPOCH_DIFF_SECS: f64 = 11_644_473_600.0;
 /// 所以这里留一份，让窗口挂载时能主动问一次。
 static LATEST: Mutex<Option<NowPlaying>> = Mutex::new(None);
 
+/// 用户指定的播放器（SMTC 的 AUMID）。None = 自动挑选。
+///
+/// 前端把设置里的选择推过来，播放线程每拍都读它 —— 换了播放器不用重启线程。
+static PREF: Mutex<Option<String>> = Mutex::new(None);
+
 /// 封面缓存：(曲名 \u{1} 歌手, data URL)。
 ///
 /// 抓封面要开一次流、读几万字节，放进每 250ms 的 tick 里太重，
@@ -56,8 +61,32 @@ fn b64(data: &[u8]) -> String {
     out
 }
 
+/// 把 SMTC 的 AUMID 变成人看得懂的名字。
+///
+/// 桌面播放器上报的是 exe 名（`CloudMusic.exe`），UWP 上报的是
+/// `Publisher.App_arch!App` 这种包标识。两种都取"最像名字的那一段"。
+fn app_name(aumid: &str) -> String {
+    if aumid.is_empty() {
+        return "未知播放器".into();
+    }
+    let tail = aumid.rsplit('!').next().unwrap_or(aumid);
+    let name = if aumid.to_ascii_lowercase().ends_with(".exe") {
+        tail
+    } else {
+        tail.rsplit('.').next().unwrap_or(tail)
+    };
+    let name = name.trim_end_matches(".exe").trim();
+    if name.is_empty() {
+        aumid.to_string()
+    } else {
+        name.to_string()
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct NowPlaying {
+    /// 播放器显示名（来源应用），例如 `CloudMusic` / `Spotify`
+    pub app: String,
     pub title: String,
     pub artist: String,
     pub album: String,
@@ -201,6 +230,72 @@ fn now_unix() -> f64 {
 }
 
 #[cfg(windows)]
+fn aumid_of(
+    s: &windows::Media::Control::GlobalSystemMediaTransportControlsSession,
+) -> String {
+    s.SourceAppUserModelId()
+        .map(|h| h.to_string())
+        .unwrap_or_default()
+}
+
+/// 设置页「歌词」标签用：当前系统里所有能读到播放信息的播放器。
+#[derive(Serialize)]
+pub struct PlayerInfo {
+    /// 用来记住选择（AUMID，进程重启也不会变）
+    pub id: String,
+    pub name: String,
+    pub playing: bool,
+}
+
+#[tauri::command]
+pub fn list_players() -> Vec<PlayerInfo> {
+    #[cfg(windows)]
+    unsafe {
+        use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager as Manager;
+        use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let mut out: Vec<PlayerInfo> = Vec::new();
+        if let Some(mgr) = Manager::RequestAsync().ok().and_then(|o| o.get().ok()) {
+            if let Ok(list) = mgr.GetSessions() {
+                for i in 0..list.Size().unwrap_or(0) {
+                    if let Ok(s) = list.GetAt(i) {
+                        let id = aumid_of(&s);
+                        if id.is_empty() || out.iter().any(|p| p.id == id) {
+                            continue;
+                        }
+                        out.push(PlayerInfo {
+                            name: app_name(&id),
+                            playing: is_playing(&s),
+                            id,
+                        });
+                    }
+                }
+            }
+        }
+        CoUninitialize();
+        out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        out
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
+/// 空串 = 自动。前端在启动和设置变化时推一次。
+#[tauri::command]
+pub fn set_player_pref(id: String) {
+    let next = if id.trim().is_empty() { None } else { Some(id) };
+    if let Ok(mut g) = PREF.lock() {
+        *g = next.clone();
+    }
+    crate::logbuf::info(&format!(
+        "歌词来源 → {}",
+        next.clone().unwrap_or_else(|| "自动".into())
+    ));
+}
+
+#[cfg(windows)]
 fn is_playing(
     s: &windows::Media::Control::GlobalSystemMediaTransportControlsSession,
 ) -> bool {
@@ -217,23 +312,47 @@ fn read_snapshot(st: &mut PauseState) -> Option<NowPlaying> {
 
     let mgr = Manager::RequestAsync().ok()?.get().ok()?;
 
-    // 当前会话不等于"正在播的那个"：随便开个网页、视频、语音都能抢走 current session，
-    // 这时读到的就是暂停的会话。它没在播时，优先挑一个真正在播放的。
-    let mut session = mgr.GetCurrentSession().ok();
-    let current_plays = session.as_ref().map(is_playing).unwrap_or(false);
-    if !current_plays {
+    let pref = PREF.lock().ok().and_then(|g| g.clone());
+
+    // 用户在设置里指定了播放器：优先用那一个（哪怕它现在暂停着，也不该被别的会话抢走）。
+    // 选中的播放器关掉了就退回自动，免得词板一直空着。
+    let mut session = None;
+    if let Some(want) = pref.as_ref() {
         if let Ok(list) = mgr.GetSessions() {
             for i in 0..list.Size().unwrap_or(0) {
                 if let Ok(s) = list.GetAt(i) {
-                    if is_playing(&s) {
+                    if aumid_of(&s) == *want {
                         session = Some(s);
                         break;
                     }
                 }
             }
         }
+        if session.is_none() {
+            crate::logbuf::warn(&format!("指定的播放器不在运行：{want}，改用自动选择"));
+        }
+    }
+
+    // 当前会话不等于"正在播的那个"：随便开个网页、视频、语音都能抢走 current session，
+    // 这时读到的就是暂停的会话。它没在播时，优先挑一个真正在播放的。
+    if session.is_none() {
+        session = mgr.GetCurrentSession().ok();
+        let current_plays = session.as_ref().map(is_playing).unwrap_or(false);
+        if !current_plays {
+            if let Ok(list) = mgr.GetSessions() {
+                for i in 0..list.Size().unwrap_or(0) {
+                    if let Ok(s) = list.GetAt(i) {
+                        if is_playing(&s) {
+                            session = Some(s);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
     let session = session?;
+    let app = app_name(&aumid_of(&session));
 
     let props = session.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
     let title = props.Title().map(|s| s.to_string()).unwrap_or_default();
@@ -310,6 +429,7 @@ fn read_snapshot(st: &mut PauseState) -> Option<NowPlaying> {
     };
 
     Some(NowPlaying {
+        app,
         title,
         artist,
         album,
@@ -323,4 +443,35 @@ fn read_snapshot(st: &mut PauseState) -> Option<NowPlaying> {
 #[cfg(not(windows))]
 fn read_snapshot(_st: &mut PauseState) -> Option<NowPlaying> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::app_name;
+
+    #[test]
+    fn reads_desktop_exe_names() {
+        // 桌面播放器：AUMID 就是 exe 名
+        assert_eq!(app_name("CloudMusic.exe"), "CloudMusic");
+        assert_eq!(app_name("QQMusic.exe"), "QQMusic");
+        assert_eq!(app_name("Spotify.exe"), "Spotify");
+    }
+
+    #[test]
+    fn reads_uwp_package_names() {
+        // UWP：Publisher.App_arch!App，取最后一段里最像名字的那一截
+        assert_eq!(
+            app_name("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"),
+            "Spotify"
+        );
+        assert_eq!(
+            app_name("Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"),
+            "ZuneMusic"
+        );
+    }
+
+    #[test]
+    fn falls_back_on_unknown() {
+        assert_eq!(app_name(""), "未知播放器");
+    }
 }

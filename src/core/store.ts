@@ -65,6 +65,11 @@ export interface AppSettings {
   }
   lyric: {
     offsetMs: number
+    /**
+     * 歌词来源播放器（SMTC 的 AUMID）。空串 = 自动：谁在播就用谁。
+     * 存 AUMID 而不是显示名，播放器改名/换语言也不影响对应关系。
+     */
+    player: string
   }
 }
 
@@ -94,7 +99,7 @@ export const DEFAULTS: AppSettings = {
   glass: { tint: '#14141a', alpha: 0.42 },
   behavior: { autostart: false, alwaysOnTop: true, locked: false, hideWhenIdle: false },
   info: { show: false, pos: 'top', cover: 'left', text: 'left' },
-  lyric: { offsetMs: 0 },
+  lyric: { offsetMs: 0, player: '' },
 }
 
 const KEY = 'lyricsfloat.settings.v3'
@@ -298,6 +303,8 @@ export interface Runtime {
   trackTitle: string
   trackArtist: string
   trackAlbum: string
+  /** 当前歌词来自哪个播放器（显示名，例如 CloudMusic） */
+  trackApp: string
   /** 当前曲目封面（data URL），取不到时为空串 */
   trackCover: string
   source: string
@@ -320,6 +327,7 @@ export const runtime = reactive<Runtime>({
   trackTitle: '',
   trackArtist: '',
   trackAlbum: '',
+  trackApp: '',
   trackCover: '',
   source: '',
   notice: '',

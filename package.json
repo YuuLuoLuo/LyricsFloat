@@ -2,7 +2,7 @@
   "name": "lyricsfloat",
   "private": true,
   "license": "MIT",
-  "version": "26.11.4",
+  "version": "26.11.5",
   "type": "module",
   "description": "LyricsFloat - 桌面悬浮歌词：锁定全透明、鼠标穿透、悬停显形",
   "scripts": {

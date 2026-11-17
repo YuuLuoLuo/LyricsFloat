@@ -36,6 +36,8 @@ pub fn run() {
             lyrics::fetch_lyric,
             player::now_playing,
             player::now_cover,
+            player::list_players,
+            player::set_player_pref,
             fonts::list_fonts,
             settings_io::settings_path_cmd,
             settings_io::settings_load,

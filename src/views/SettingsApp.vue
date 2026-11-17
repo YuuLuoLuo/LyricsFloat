@@ -9,6 +9,7 @@ import { initPlayer, reapplyOffset } from '../core/player'
 import { exportSettingsToDesktop, importSettingsFile, initSettingsFile, settingsFilePath } from '../core/persist'
 import { ABOUT } from '../core/about'
 import type { LyricLine } from '../core/types'
+import type { PlayerInfo } from '../core/bridge'
 import {
   appVersion,
   checkUpdate,
@@ -17,6 +18,7 @@ import {
   getAutostart,
   isTauri,
   listFonts,
+  listPlayers,
   minimizeSelf,
   onFileDrop,
   openUrl,
@@ -26,6 +28,7 @@ import {
   setAlwaysOnTop,
   setAutostart,
   setLocked,
+  setPlayerPref,
   startDragging,
 } from '../core/bridge'
 
@@ -51,6 +54,7 @@ const fonts = ref<string[]>([...CURATED])
 
 const TABS = [
   { id: 'general', label: '常规' },
+  { id: 'lyrics', label: '歌词' },
   { id: 'look', label: '外观' },
   { id: 'about', label: '关于' },
 ] as const
@@ -318,7 +322,33 @@ async function toggleAlwaysOnTop(v: boolean) {
   void setAlwaysOnTop(v)
 }
 
-/** 开了「无播放时自动隐藏」= 词板可能整个不在，尺寸/背景这些项就没意义了 */
+/* --------------------------------------------------------------- 播放器 */
+
+/**
+ * SMTC 里能读到播放信息的播放器列表。
+ * 沙盒/浏览器预览里拿不到，此时只留「自动」一个选项。
+ */
+const players = ref<PlayerInfo[]>([])
+let playerTimer: ReturnType<typeof setInterval> | null = null
+
+async function refreshPlayers(): Promise<void> {
+  if (!isTauri) return
+  players.value = await listPlayers()
+}
+
+/** 当前歌词实际来自哪个播放器（读不到就直说） */
+const playerLabel = computed(() => {
+  if (runtime.trackApp) return settings.lyric.player ? `${runtime.trackApp}（已指定）` : runtime.trackApp
+  return settings.lyric.player ? '该播放器当前没有在播' : '未检测到播放器'
+})
+
+function pickPlayer(id: string): void {
+  settings.lyric.player = id
+  saveSettings()
+  void setPlayerPref(id)
+}
+
+/** 「无播放时关闭词板」= 词板可能整个不在，尺寸/背景这些项就没意义了 */
 const parkMode = computed(() => settings.behavior.hideWhenIdle)
 
 function toggleHideWhenIdle(v: boolean) {
@@ -492,6 +522,21 @@ watch(
   },
 )
 
+// 播放器列表只在「歌词」页可见时轮询，别的页面不白烧定时器
+watch(
+  tab,
+  (v) => {
+    if (playerTimer) {
+      clearInterval(playerTimer)
+      playerTimer = null
+    }
+    if (v !== 'lyrics') return
+    void refreshPlayers()
+    playerTimer = setInterval(() => void refreshPlayers(), 2000)
+  },
+  { immediate: true },
+)
+
 watch(
   settings,
   () => {
@@ -524,6 +569,10 @@ onMounted(async () => {
   window.addEventListener('storage', onStorage)
   syncTimer = setInterval(pullSettings, 900)
 
+  // 歌词来源偏好推给 Rust（词板窗口也会推，两边都推才不会互相覆盖）
+  await setPlayerPref(settings.lyric.player)
+  await refreshPlayers()
+
   // 设置文件 + 系统字体列表
   await initSettingsFile()
   pathText.value = settingsFilePath()
@@ -553,6 +602,7 @@ onBeforeUnmount(() => {
   if (toastTimer) clearTimeout(toastTimer)
   stopPlayer?.()
   offDrop?.()
+  if (playerTimer) clearInterval(playerTimer)
   if (onStorage) window.removeEventListener('storage', onStorage)
   saveSettings()
 })
@@ -598,8 +648,8 @@ onBeforeUnmount(() => {
       </nav>
 
       <div class="body">
-        <!-- 预览固定在顶部，不随设置滚动 -->
-        <div class="preview">
+        <!-- 预览只在「外观」页出现：其它页没有样式可调，占着位置反而干扰 -->
+        <div v-if="tab === 'look'" class="preview">
           <div class="paper" :style="[previewPaper, { height: `${previewH}px` }]">
             <div class="glasslayer" :style="previewGlass"></div>
             <LyricStage
@@ -615,6 +665,115 @@ onBeforeUnmount(() => {
         <div class="scroll">
           <!-- ---------------------------------------------------- 常规 -->
           <section v-show="tab === 'general'">
+            <h3>行为</h3>
+            <div class="swrow">
+              <label class="switch">
+                <span>开机自动启动</span>
+                <input
+                  type="checkbox"
+                  :checked="autostart.value"
+                  :disabled="autostart.busy"
+                  @change="toggleAutostart(($event.target as HTMLInputElement).checked)"
+                />
+                <i></i>
+              </label>
+              <label class="switch">
+                <span>总在最前</span>
+                <input
+                  type="checkbox"
+                  :checked="settings.behavior.alwaysOnTop"
+                  @change="toggleAlwaysOnTop(($event.target as HTMLInputElement).checked)"
+                />
+                <i></i>
+              </label>
+            </div>
+            <div class="swrow">
+              <label class="switch">
+                <span>锁定词板</span>
+                <input
+                  type="checkbox"
+                  :checked="settings.behavior.locked"
+                  @change="toggleLocked(($event.target as HTMLInputElement).checked)"
+                />
+                <i></i>
+              </label>
+              <label class="switch">
+                <span>无播放时关闭词板</span>
+                <input
+                  type="checkbox"
+                  :checked="settings.behavior.hideWhenIdle"
+                  @change="toggleHideWhenIdle(($event.target as HTMLInputElement).checked)"
+                />
+                <i></i>
+              </label>
+            </div>
+            <p v-if="settings.behavior.hideWhenIdle" class="hint">
+              没有播放、或当前媒体没有歌词时，词板整个关闭（不渲染）。调尺寸与背景前请先关掉它。
+            </p>
+            <div class="row">
+              <span class="lbl">词板位置</span>
+              <div class="grow"></div>
+              <button class="mini" @click="resetPos">移回屏幕中央</button>
+            </div>
+
+            <h3>设置文件</h3>
+            <div class="row">
+              <span class="lbl">位置</span>
+              <div class="grow path mono" :title="pathText">{{ pathText || '（浏览器预览无文件）' }}</div>
+              <button class="mini" @click="copyPath">复制</button>
+            </div>
+            <p class="hint">
+              配置随软件本体保存。把导出的设置文件拖入窗口即可导入。
+            </p>
+            <div class="danger-zone">
+              <button class="ghost" @click="doExport">导出到桌面</button>
+              <button class="ghost" @click="hintImport">导入…</button>
+              <button class="ghost" @click="resetSettings">恢复默认</button>
+              <button class="danger" @click="quit">退出 LyricsFloat</button>
+            </div>
+
+            <h3>日志</h3>
+            <p class="hint">导出到软件所在目录：LyricsFloat-log-日期-时间.txt</p>
+            <div class="danger-zone">
+              <button class="ghost" @click="doExportLog">导出日志</button>
+            </div>
+          </section>
+
+          <!-- ---------------------------------------------------- 歌词 -->
+          <section v-show="tab === 'lyrics'">
+            <h3>播放器</h3>
+            <div class="row">
+              <span class="lbl">当前播放器</span>
+              <div class="grow muted">{{ playerLabel }}</div>
+            </div>
+            <div class="row">
+              <span class="lbl">歌词来源</span>
+              <div class="chips grow">
+                <button
+                  class="chip"
+                  :class="{ on: !settings.lyric.player }"
+                  @click="pickPlayer('')"
+                >
+                  自动
+                </button>
+                <button
+                  v-for="p in players"
+                  :key="p.id"
+                  class="chip"
+                  :class="{ on: settings.lyric.player === p.id }"
+                  :title="p.id"
+                  @click="pickPlayer(p.id)"
+                >
+                  {{ p.name }}
+                  <span v-if="p.playing" class="chip-dot"></span>
+                </button>
+                <span v-if="!players.length" class="chip-empty">还没有读到播放器</span>
+              </div>
+            </div>
+            <p class="hint">
+              自动 = 谁在播就用谁。指定后只看这个播放器；它退出后自动退回「自动」。
+            </p>
+
             <h3>当前播放</h3>
             <div class="row">
               <span class="lbl">曲目</span>
@@ -646,104 +805,39 @@ onBeforeUnmount(() => {
               />
               <span class="val">{{ settings.lyric.offsetMs }} ms</span>
             </div>
-
-            <h3>行为</h3>
-            <label class="switch">
-              <span>开机自动启动</span>
-              <input
-                type="checkbox"
-                :checked="autostart.value"
-                :disabled="autostart.busy"
-                @change="toggleAutostart(($event.target as HTMLInputElement).checked)"
-              />
-              <i></i>
-            </label>
-            <label class="switch">
-              <span>总在最前</span>
-              <input
-                type="checkbox"
-                :checked="settings.behavior.alwaysOnTop"
-                @change="toggleAlwaysOnTop(($event.target as HTMLInputElement).checked)"
-              />
-              <i></i>
-            </label>
-            <label class="switch">
-              <span>锁定词板</span>
-              <input
-                type="checkbox"
-                :checked="settings.behavior.locked"
-                @change="toggleLocked(($event.target as HTMLInputElement).checked)"
-              />
-              <i></i>
-            </label>
-            <label class="switch">
-              <span class="lbl">无播放时自动隐藏</span>
-              <input
-                type="checkbox"
-                :checked="settings.behavior.hideWhenIdle"
-                @change="toggleHideWhenIdle(($event.target as HTMLInputElement).checked)"
-              />
-              <i></i>
-            </label>
-            <p v-if="settings.behavior.hideWhenIdle" class="hint">
-              词板已隐藏：没有播放、或当前媒体没有歌词时都不显示。调整尺寸与背景前请先关闭此开关。
-            </p>
-            <div class="row">
-              <span class="lbl">词板位置</span>
-              <div class="grow"></div>
-              <button class="mini" @click="resetPos">移回屏幕中央</button>
-            </div>
-
-            <h3>设置文件</h3>
-            <div class="row">
-              <span class="lbl">位置</span>
-              <div class="grow path mono" :title="pathText">{{ pathText || '（浏览器预览无文件）' }}</div>
-              <button class="mini" @click="copyPath">复制</button>
-            </div>
-            <p class="hint">
-              配置随软件本体保存。把导出的设置文件拖入窗口即可导入。
-            </p>
-            <div class="danger-zone">
-              <button class="ghost" @click="doExport">导出到桌面</button>
-              <button class="ghost" @click="hintImport">导入…</button>
-              <button class="ghost" @click="resetSettings">恢复默认</button>
-              <button class="danger" @click="quit">退出 LyricsFloat</button>
-            </div>
-
-            <h3>日志</h3>
-            <p class="hint">日志只存在内存里，退出即清空；导出时才会在软件目录生成文件。</p>
-            <div class="danger-zone">
-              <button class="ghost" @click="doExportLog">导出日志</button>
-            </div>
           </section>
 
           <!-- ---------------------------------------------------- 外观 -->
           <section v-show="tab === 'look'">
             <h3>歌词样式</h3>
-            <label class="switch">
-              <span>歌词旋转</span>
-              <input
-                type="checkbox"
-                :checked="settings.view.rotate"
-                @change="toggleRotate(($event.target as HTMLInputElement).checked)"
-              />
-              <i></i>
-            </label>
-            <label class="switch">
-              <span>歌词翻译</span>
-              <input v-model="settings.view.translation" type="checkbox" />
-              <i></i>
-            </label>
-            <label class="switch">
-              <span>逐字高亮</span>
-              <input v-model="settings.view.karaoke" type="checkbox" />
-              <i></i>
-            </label>
-            <label class="switch">
-              <span>显示歌词信息</span>
-              <input v-model="settings.info.show" type="checkbox" />
-              <i></i>
-            </label>
+            <div class="swrow">
+              <label class="switch">
+                <span>歌词旋转</span>
+                <input
+                  type="checkbox"
+                  :checked="settings.view.rotate"
+                  @change="toggleRotate(($event.target as HTMLInputElement).checked)"
+                />
+                <i></i>
+              </label>
+              <label class="switch">
+                <span>歌词翻译</span>
+                <input v-model="settings.view.translation" type="checkbox" />
+                <i></i>
+              </label>
+            </div>
+            <div class="swrow">
+              <label class="switch">
+                <span>逐字高亮</span>
+                <input v-model="settings.view.karaoke" type="checkbox" />
+                <i></i>
+              </label>
+              <label class="switch">
+                <span>显示歌词信息</span>
+                <input v-model="settings.info.show" type="checkbox" />
+                <i></i>
+              </label>
+            </div>
 
             <template v-if="show.card">
               <h3>歌词信息布局</h3>
@@ -822,7 +916,7 @@ onBeforeUnmount(() => {
             </template>
 
             <h3>词板尺寸</h3>
-            <p v-if="parkMode" class="hint">已开启「无播放时自动隐藏」，先关掉开关再调尺寸。</p>
+            <p v-if="parkMode" class="hint">已开启「无播放时关闭词板」，先关掉开关再调尺寸。</p>
             <div class="dimmed" :class="{ on: parkMode }">
             <div class="row">
               <span class="lbl">宽度</span>
@@ -850,7 +944,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="row">
               <span class="lbl">可显示</span>
-              <div class="grow muted">当前可显示 {{ capacity }} 行歌词</div>
+              <div class="grow muted">当前大约可显示 {{ capacity }} 行歌词</div>
             </div>
             </div>
 
@@ -1330,12 +1424,13 @@ onBeforeUnmount(() => {
   border-radius: 5px;
 }
 
+/* 分组标题：比正文（12.5px）大一号并加粗，扫视时一眼分开各段 */
 h3 {
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.09em;
-  color: rgba(255, 255, 255, 0.38);
-  margin: 22px 0 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: rgba(255, 255, 255, 0.74);
+  margin: 24px 0 12px;
 }
 
 section > h3:first-child {
@@ -1408,6 +1503,57 @@ section > h3:first-child {
 .mini:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* 播放器选择：名字长短不齐，用可以换行的 chip 而不是等宽分段按钮 */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.chip.on {
+  border-color: rgba(127, 212, 255, 0.5);
+  background: rgba(127, 212, 255, 0.16);
+  color: #cfeeff;
+}
+
+.chip-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #6ee7a8;
+  flex: none;
+}
+
+.chip-empty {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.3);
 }
 
 /* ------------------------------------------------------------- 关于页 */
@@ -1591,10 +1737,25 @@ section > h3:first-child {
   justify-content: space-between;
   font-size: 12.5px;
   color: rgba(255, 255, 255, 0.62);
-  margin-bottom: 12px;
+  margin-bottom: 0;
   cursor: pointer;
   position: relative;
   gap: 10px;
+  /* 开关一律单行：名字长到换行会让整行高度和邻居错开 */
+  white-space: nowrap;
+}
+
+.switch > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 开关两列排布：一行两个，比竖着排一长串好扫 */
+.swrow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 26px;
+  margin-bottom: 12px;
 }
 
 .switch input {

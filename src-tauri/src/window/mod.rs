@@ -11,7 +11,7 @@ pub(crate) static LOCKED: AtomicBool = AtomicBool::new(false);
 pub(crate) static REVEALED: AtomicBool = AtomicBool::new(false);
 /// 玻璃底色，AABBGGRR（SCA 要的是 ABGR 顺序）
 pub(crate) static GLASS_COLOR: AtomicU32 = AtomicU32::new(0x9E_1E1A1A);
-/// 「无播放时自动隐藏」：词板整个窗口藏起来，连透明的那层都不参与。
+/// 「无播放时关闭词板」：词板整个窗口藏起来，连透明的那层都不参与。
 /// 和 LOCKED 的区别是锁定时窗口还在（只是隐形），这个是彻底 hide()。
 pub(crate) static PARKED: AtomicBool = AtomicBool::new(false);
 /// 临时显形的截止时刻（epoch ms）。设置页拖宽高时反复刷新，
@@ -287,7 +287,7 @@ pub fn peek_board(app: AppHandle, ms: u64) {
     }
 }
 
-/// 「无播放时自动隐藏」的落地：true = 整个窗口藏起来（连隐形层都不占）。
+/// 「无播放时关闭词板」的落地：true = 整个窗口藏起来（连隐形层都不占）。
 /// 锁定时窗口本来就不可见，这里只是把 show/hide 对上去。
 #[tauri::command]
 pub fn set_board_parked(app: AppHandle, parked: bool) {

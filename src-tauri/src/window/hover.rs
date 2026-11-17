@@ -22,7 +22,7 @@ pub fn spawn(app: AppHandle, win: WebviewWindow) {
         loop {
             thread::sleep(Duration::from_millis(TICK_MS));
 
-            // 「无播放时自动隐藏」期间窗口是 hide 状态，什么都别碰：
+            // 「无播放时关闭词板」期间窗口是 hide 状态，什么都别碰：
             // 既不该显形，也省掉每拍的样式读写
             if PARKED.load(Ordering::Relaxed) {
                 leave_ticks = 0;
