@@ -70,6 +70,8 @@ export interface AppSettings {
      * 存 AUMID 而不是显示名，播放器改名/换语言也不影响对应关系。
      */
     player: string
+    /** 锁定已选择的播放器：它退出后不退回自动，读不到就当没有播放 */
+    pinPlayer: boolean
   }
 }
 
@@ -99,7 +101,7 @@ export const DEFAULTS: AppSettings = {
   glass: { tint: '#14141a', alpha: 0.42 },
   behavior: { autostart: false, alwaysOnTop: true, locked: false, hideWhenIdle: false },
   info: { show: false, pos: 'top', cover: 'left', text: 'left' },
-  lyric: { offsetMs: 0, player: '' },
+  lyric: { offsetMs: 0, player: '', pinPlayer: false },
 }
 
 const KEY = 'lyricsfloat.settings.v3'

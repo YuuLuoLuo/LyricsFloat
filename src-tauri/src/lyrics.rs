@@ -313,9 +313,17 @@ fn http_get(url: &str, referer: Option<&str>) -> Option<String> {
     }
 
     match req.call() {
-        Ok(resp) => resp.into_string().ok(),
+        Ok(resp) => {
+            let code = resp.status();
+            let body = resp.into_string().ok();
+            if code != 200 {
+                crate::logbuf::warn(&format!("歌词接口 HTTP {code}：{url}"));
+            }
+            body
+        }
         Err(err) => {
-            eprintln!("[lyrics] GET {url} failed: {err}");
+            // 网络失败在用户看来就是"这首没歌词"，日志里得能看出是网络还是没匹配到
+            crate::logbuf::warn(&format!("歌词接口请求失败：{url} → {err}"));
             None
         }
     }

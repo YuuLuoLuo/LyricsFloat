@@ -24,6 +24,10 @@ static LATEST: Mutex<Option<NowPlaying>> = Mutex::new(None);
 ///
 /// 前端把设置里的选择推过来，播放线程每拍都读它 —— 换了播放器不用重启线程。
 static PREF: Mutex<Option<String>> = Mutex::new(None);
+/// 锁定了指定播放器：它不在时不再退回自动挑选（读不到就当作没有播放）。
+static PIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// 「指定的播放器不在」只记一次日志，别每 250ms 刷一行
+static PREF_MISS_LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// 封面缓存：(曲名 \u{1} 歌手, data URL)。
 ///
@@ -124,6 +128,8 @@ pub fn spawn(app: AppHandle) {
         }
 
         let mut last_key = String::new();
+        let mut last_app = String::new();
+        let mut last_playing = true;
         let mut was_alive = false;
         let mut pause = PauseState::default();
 
@@ -133,6 +139,10 @@ pub fn spawn(app: AppHandle) {
                     was_alive = true;
                     store(Some(&np));
                     let key = format!("{}\u{1}{}", np.title, np.artist);
+                    if np.app != last_app {
+                        last_app = np.app.clone();
+                        crate::logbuf::info(&format!("当前播放器：{}", np.app));
+                    }
                     if key != last_key {
                         last_key = key.clone();
                         crate::logbuf::info(&format!(
@@ -140,6 +150,14 @@ pub fn spawn(app: AppHandle) {
                             np.title, np.artist, np.duration.round() as i64
                         ));
                         let _ = app.emit("track-changed", &np);
+                    }
+                    if np.playing != last_playing {
+                        last_playing = np.playing;
+                        crate::logbuf::info(if np.playing {
+                            "播放状态：播放中"
+                        } else {
+                            "播放状态：已暂停"
+                        });
                     }
                     let _ = app.emit("player-tick", &np);
                 }
@@ -282,6 +300,13 @@ pub fn list_players() -> Vec<PlayerInfo> {
     }
 }
 
+/// 锁定已选择的播放器：true = 它不在时也不退回自动。
+#[tauri::command]
+pub fn set_player_pin(pin: bool) {
+    PIN.store(pin, std::sync::atomic::Ordering::Relaxed);
+    crate::logbuf::info(&format!("播放器锁定 → {}", if pin { "开" } else { "关" }));
+}
+
 /// 空串 = 自动。前端在启动和设置变化时推一次。
 #[tauri::command]
 pub fn set_player_pref(id: String) {
@@ -329,7 +354,19 @@ fn read_snapshot(st: &mut PauseState) -> Option<NowPlaying> {
             }
         }
         if session.is_none() {
-            crate::logbuf::warn(&format!("指定的播放器不在运行：{want}，改用自动选择"));
+            let pin = PIN.load(std::sync::atomic::Ordering::Relaxed);
+            if !PREF_MISS_LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                crate::logbuf::warn(&format!(
+                    "指定的播放器不在运行：{want}（{}）",
+                    if pin { "已锁定，等它回来" } else { "改用自动选择" }
+                ));
+            }
+            // 锁定了就认死这个播放器：它退出后词板按"没有播放"处理，不偷偷换源
+            if pin {
+                return None;
+            }
+        } else {
+            PREF_MISS_LOGGED.store(false, std::sync::atomic::Ordering::Relaxed);
         }
     }
 

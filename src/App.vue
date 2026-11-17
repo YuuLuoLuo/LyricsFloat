@@ -8,8 +8,10 @@ import { initSettingsFile } from './core/persist'
 import {
   isTauri,
   listenNative,
+  logLine,
   restorePosition,
   setBoardParked,
+  setPlayerPin,
   setPlayerPref,
   showSelf,
   applyBoard,
@@ -80,11 +82,25 @@ watch(
   () => settings.lyric.player,
   (v) => void setPlayerPref(v),
 )
+watch(
+  () => settings.lyric.pinPlayer,
+  (v) => void setPlayerPin(v),
+)
 
 onMounted(async () => {
   raf = requestAnimationFrame(loop)
   // 先把磁盘上的设置接上（首次运行会顺手落一份），再拿尺寸去开窗口
   await initSettingsFile()
+  // 设置摘要进日志：复盘"某个设置下才出问题"时最省事的一条线索
+  void logLine(
+    'INFO',
+    `设置：${settings.window.width}x${settings.window.height} 字号${settings.appearance.fontSize} ` +
+      `行距${settings.appearance.lineHeight} 对齐${settings.appearance.align} ` +
+      `旋转${settings.view.rotate ? '开' : '关'} 翻译${settings.view.translation ? '开' : '关'} ` +
+      `逐字${settings.view.karaoke ? '开' : '关'} 信息${settings.info.show ? '开' : '关'} ` +
+      `锁定${settings.behavior.locked ? '开' : '关'} 关闭词板${settings.behavior.hideWhenIdle ? '开' : '关'} ` +
+      `来源${settings.lyric.player || '自动'}${settings.lyric.pinPlayer ? '(锁定)' : ''}`,
+  )
   const stopPlayer = await initPlayer()
   offNative = stopPlayer
 
@@ -108,6 +124,7 @@ onMounted(async () => {
     }
 
     await setPlayerPref(settings.lyric.player)
+    await setPlayerPin(settings.lyric.pinPlayer)
     await applyBoard(settings)
     await setAlwaysOnTop(settings.behavior.alwaysOnTop)
     if (settings.behavior.locked) await setLocked(true)

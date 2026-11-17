@@ -14,20 +14,37 @@ const LEAVE_DELAY_MS: u64 = 320;
 const PAD_IN: i32 = 4;
 /// 离开判定内收：防止刚滑到边上就消失
 const PAD_OUT: i32 = 36;
+/// 停放期间每隔这么久核对一次窗口是否还藏着（16ms * 60 ≈ 1s）
+const PARKED_CHECK_TICKS: u64 = 60;
 
 pub fn spawn(app: AppHandle, win: WebviewWindow) {
     thread::spawn(move || {
         let mut leave_ticks: u64 = 0;
+        let mut parked_checks: u64 = 0;
 
         loop {
             thread::sleep(Duration::from_millis(TICK_MS));
 
             // 「无播放时关闭词板」期间窗口是 hide 状态，什么都别碰：
-            // 既不该显形，也省掉每拍的样式读写
+            // 既不该显形，也省掉每拍的样式读写。
+            // 但 hide/show 都可能被别的路径（tao 兜底 show、设置页调尺寸）搅乱，
+            // 所以每秒核对一次"它真的还藏着、而且带穿透样式"，不对劲就纠正。
             if PARKED.load(Ordering::Relaxed) {
                 leave_ticks = 0;
+                parked_checks += 1;
+                if parked_checks >= PARKED_CHECK_TICKS {
+                    parked_checks = 0;
+                    if win.is_visible().unwrap_or(false) {
+                        effects::disable_glass(&win);
+                        effects::set_click_through(&win, true);
+                        let _ = win.hide();
+                        let _ = app.emit("hover-changed", false);
+                        crate::logbuf::warn("词板在停用状态被重新显示，已再次隐藏");
+                    }
+                }
                 continue;
             }
+            parked_checks = 0;
 
             // 兜底：只要有谁把 WS_CAPTION 塞回窗口样式（tao 在 set_size /
             // set_always_on_top / show 之后都会整份重写一次），就地摘掉。

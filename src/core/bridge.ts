@@ -326,6 +326,11 @@ export async function setPlayerPref(id: string): Promise<void> {
   await call('set_player_pref', { id })
 }
 
+/** 锁定已选择的播放器：true = 它不在时也不退回自动 */
+export async function setPlayerPin(pin: boolean): Promise<void> {
+  await call('set_player_pin', { pin })
+}
+
 /** 无播放时关闭词板：true = 把词板窗口整个藏起来 */
 export async function setBoardParked(parked: boolean): Promise<void> {
   await call('set_board_parked', { parked })

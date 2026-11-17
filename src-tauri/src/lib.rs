@@ -38,6 +38,7 @@ pub fn run() {
             player::now_cover,
             player::list_players,
             player::set_player_pref,
+            player::set_player_pin,
             fonts::list_fonts,
             settings_io::settings_path_cmd,
             settings_io::settings_load,
@@ -46,6 +47,9 @@ pub fn run() {
             settings_io::settings_import_file,
         ])
         .setup(|app| {
+            // 先判断上次有没有正常退出，再开始写这一轮的日志
+            logbuf::begin_session();
+            install_panic_hook();
             logbuf::info(&format!(
                 "启动 LyricsFloat {}，exe={}",
                 about::APP_VERSION,
@@ -54,6 +58,13 @@ pub fn run() {
                     .unwrap_or_else(|_| "未知".into())
             ));
             logbuf::info(&format!("设置文件：{}", settings_io::settings_path_cmd()));
+            logbuf::info(&format!(
+                "系统：{} / {} 位",
+                std::env::var("OS").unwrap_or_else(|_| "Windows".into()),
+                std::mem::size_of::<usize>() * 8
+            ));
+            // 上次崩过就问一句要不要导出；线程里弹窗，别卡启动
+            logbuf::prompt_crash_if_any();
             window::setup(app.handle())?;
             tray::setup(app.handle())?;
             player::spawn(app.handle().clone());
@@ -70,6 +81,33 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running LyricsFloat");
+        .build(tauri::generate_context!())
+        .expect("error while building LyricsFloat")
+        .run(|_app, event| {
+            // 正常退出：删运行标记，下次启动才不会误判成崩溃
+            if let tauri::RunEvent::Exit = event {
+                logbuf::info("正常退出");
+                logbuf::end_session();
+            }
+        });
+}
+
+/// 崩溃时至少把最后几句话留在磁盘上：panic 默认只打到控制台，release 里看不到。
+fn install_panic_hook() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let loc = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "未知位置".into());
+        let msg = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "未知 panic".into()
+        };
+        logbuf::error(&format!("崩溃：{msg} @ {loc}"));
+        default(info);
+    }));
 }

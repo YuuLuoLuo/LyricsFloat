@@ -28,6 +28,7 @@ import {
   setAlwaysOnTop,
   setAutostart,
   setLocked,
+  setPlayerPin,
   setPlayerPref,
   startDragging,
 } from '../core/bridge'
@@ -348,6 +349,20 @@ function pickPlayer(id: string): void {
   void setPlayerPref(id)
 }
 
+/** 锁定后不再跟随"谁在播"：指定的播放器不在时词板就当作没有播放 */
+function togglePin(v: boolean): void {
+  settings.lyric.pinPlayer = v
+  saveSettings()
+  void setPlayerPin(v)
+}
+
+/** 锁定的播放器叫什么 —— 列表里没有（已退出）就退回系统给的 id */
+const pinnedLabel = computed(() => {
+  const id = settings.lyric.player
+  if (!id) return '自动（未指定播放器）'
+  return players.value.find((p) => p.id === id)?.name ?? id
+})
+
 /** 「无播放时关闭词板」= 词板可能整个不在，尺寸/背景这些项就没意义了 */
 const parkMode = computed(() => settings.behavior.hideWhenIdle)
 
@@ -571,6 +586,7 @@ onMounted(async () => {
 
   // 歌词来源偏好推给 Rust（词板窗口也会推，两边都推才不会互相覆盖）
   await setPlayerPref(settings.lyric.player)
+  await setPlayerPin(settings.lyric.pinPlayer)
   await refreshPlayers()
 
   // 设置文件 + 系统字体列表
@@ -708,7 +724,7 @@ onBeforeUnmount(() => {
               </label>
             </div>
             <p v-if="settings.behavior.hideWhenIdle" class="hint">
-              没有播放、或当前媒体没有歌词时，词板整个关闭（不渲染）。调尺寸与背景前请先关掉它。
+              没有播放、或没有歌词时词板整个关闭。
             </p>
             <div class="row">
               <span class="lbl">词板位置</span>
@@ -722,9 +738,7 @@ onBeforeUnmount(() => {
               <div class="grow path mono" :title="pathText">{{ pathText || '（浏览器预览无文件）' }}</div>
               <button class="mini" @click="copyPath">复制</button>
             </div>
-            <p class="hint">
-              配置随软件本体保存。把导出的设置文件拖入窗口即可导入。
-            </p>
+            <p class="hint">把导出的设置文件拖进窗口即可导入。</p>
             <div class="danger-zone">
               <button class="ghost" @click="doExport">导出到桌面</button>
               <button class="ghost" @click="hintImport">导入…</button>
@@ -733,7 +747,9 @@ onBeforeUnmount(() => {
             </div>
 
             <h3>日志</h3>
-            <p class="hint">导出到软件所在目录：LyricsFloat-log-日期-时间.txt</p>
+            <p class="hint">
+              导出到软件所在目录，内容含版本、系统、窗口与设置、播放器与歌词匹配过程、异常记录。
+            </p>
             <div class="danger-zone">
               <button class="ghost" @click="doExportLog">导出日志</button>
             </div>
@@ -748,10 +764,11 @@ onBeforeUnmount(() => {
             </div>
             <div class="row">
               <span class="lbl">歌词来源</span>
-              <div class="chips grow">
+              <div class="chips grow" :class="{ off: settings.lyric.pinPlayer }">
                 <button
                   class="chip"
                   :class="{ on: !settings.lyric.player }"
+                  :disabled="settings.lyric.pinPlayer"
                   @click="pickPlayer('')"
                 >
                   自动
@@ -762,17 +779,27 @@ onBeforeUnmount(() => {
                   class="chip"
                   :class="{ on: settings.lyric.player === p.id }"
                   :title="p.id"
+                  :disabled="settings.lyric.pinPlayer"
                   @click="pickPlayer(p.id)"
                 >
                   {{ p.name }}
                   <span v-if="p.playing" class="chip-dot"></span>
                 </button>
-                <span v-if="!players.length" class="chip-empty">还没有读到播放器</span>
               </div>
             </div>
-            <p class="hint">
-              自动 = 谁在播就用谁。指定后只看这个播放器；它退出后自动退回「自动」。
-            </p>
+            <p v-if="!players.length" class="hint">还没有读到播放器</p>
+            <div class="swrow single">
+              <label class="switch">
+                <span>锁定已选择的播放器</span>
+                <input
+                  type="checkbox"
+                  :checked="settings.lyric.pinPlayer"
+                  @change="togglePin(($event.target as HTMLInputElement).checked)"
+                />
+                <i></i>
+              </label>
+            </div>
+            <p v-if="settings.lyric.pinPlayer" class="hint">当前已锁定：{{ pinnedLabel }}</p>
 
             <h3>当前播放</h3>
             <div class="row">
@@ -916,7 +943,7 @@ onBeforeUnmount(() => {
             </template>
 
             <h3>词板尺寸</h3>
-            <p v-if="parkMode" class="hint">已开启「无播放时关闭词板」，先关掉开关再调尺寸。</p>
+            <p v-if="parkMode" class="hint">请先关闭「无播放时关闭词板」再调整相关设置</p>
             <div class="dimmed" :class="{ on: parkMode }">
             <div class="row">
               <span class="lbl">宽度</span>
@@ -1155,7 +1182,7 @@ onBeforeUnmount(() => {
             </template>
 
             <h3>背景样式</h3>
-            <p v-if="parkMode" class="hint">词板隐藏时看不到背景，先关掉开关再调。</p>
+            <p v-if="parkMode" class="hint">请先关闭「无播放时关闭词板」再调整相关设置</p>
             <div class="dimmed" :class="{ on: parkMode }">
             <div class="row">
               <span class="lbl">不透明度</span>
@@ -1551,9 +1578,14 @@ section > h3:first-child {
   flex: none;
 }
 
-.chip-empty {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.3);
+/* 锁定了播放器之后来源不可改：整排压暗且不吃点击 */
+.chips.off {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.chip:disabled {
+  cursor: default;
 }
 
 /* ------------------------------------------------------------- 关于页 */
@@ -1756,6 +1788,12 @@ section > h3:first-child {
   grid-template-columns: 1fr 1fr;
   gap: 10px 26px;
   margin-bottom: 12px;
+}
+
+/* 单独一个开关时占满整行（标签在左、开关在右），别缩在左半边 */
+.swrow.single {
+  grid-template-columns: 1fr;
+  margin-top: 14px;
 }
 
 .switch input {

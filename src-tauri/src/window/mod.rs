@@ -99,12 +99,31 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
         let win = win.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(2500));
+            // 停放（无播放时关闭词板）本来就是"窗口不该在"，
+            // 这里再 show 一次会把隐藏好的窗口拽回来，还是不带穿透样式的那种 ——
+            // 表现就是词板突然出现、并且那块区域点不穿。
+            if PARKED.load(Ordering::Relaxed) || LOCKED.load(Ordering::Relaxed) {
+                return;
+            }
             if !win.is_visible().unwrap_or(true) {
                 let _ = win.show();
             }
         });
     }
 
+    // 窗口几何与缩放是排查"位置不对/尺寸不对/边缘有缝"的第一手资料
+    if let (Ok(pos), Ok(size), Ok(scale)) =
+        (win.outer_position(), win.outer_size(), win.scale_factor())
+    {
+        crate::logbuf::info(&format!(
+            "词板窗口：{}x{} @({}, {}) 缩放 {:.0}%",
+            size.width,
+            size.height,
+            pos.x,
+            pos.y,
+            scale * 100.0
+        ));
+    }
     crate::logbuf::info("窗口就绪：board + settings");
     hover::spawn(app.clone(), win);
     Ok(())
@@ -144,6 +163,16 @@ pub fn set_lock_state(app: &AppHandle, next: bool) {
         if let Some(win) = board(app) {
             reveal_off(&win);
         }
+    } else if PARKED.load(Ordering::Relaxed) {
+        // 开着「无播放时关闭词板」时解锁：窗口本来就该继续藏着。
+        // 但 hide/show 会被 tao 顺手改样式，所以这里再按一次"藏 + 穿透"，
+        // 免得解锁把词板连带渲染出来、还挡住下面那块区域的点击。
+        if let Some(win) = board(app) {
+            effects::disable_glass(&win);
+            effects::set_click_through(&win, true);
+            let _ = win.hide();
+            crate::logbuf::info("解锁时词板处于停用状态，保持隐藏");
+        }
     }
     let _ = app.emit("locked-changed", next);
     crate::tray::sync_label(app);
@@ -179,6 +208,7 @@ pub fn apply_board(app: AppHandle, width: f64, height: f64, tint: String, alpha:
 /// 表现就是"设置里写 380 高、窗口只有 300 高" ——
 /// 前排数按 380 算，实际只放得下 300，歌词自然就偏下被切。
 fn resize_exact(win: &WebviewWindow, width: f64, height: f64) {
+    crate::logbuf::info(&format!("调整尺寸：{}x{}（逻辑）", width, height));
     let _ = win.set_size(tauri::LogicalSize::new(width, height));
 
     let Ok(scale) = win.scale_factor() else { return };
@@ -299,11 +329,21 @@ pub fn set_board_parked(app: AppHandle, parked: bool) {
         }
         // 先关掉玻璃再藏，免得下次 show 时闪一帧亚克力
         effects::disable_glass(&win);
+        // 藏之前也把穿透补齐：万一 show 被别的路径抢先调用，
+        // 至少窗口不是"挡住点击"的状态
+        effects::set_click_through(&win, true);
         let _ = win.hide();
         crate::logbuf::info("词板已隐藏（无播放/无歌词）");
     } else {
         let _ = win.show();
+        // show() 会让 tao 整份重写 GWL_STYLE / GWL_EXSTYLE，
+        // WS_EX_LAYERED | WS_EX_TRANSPARENT 会被抹掉 —— 这里立刻补回来，
+        // 否则恢复显示的一瞬间窗口会挡住点击（锁定时还会看见它）
         effects::strip_caption(&win);
+        effects::set_click_through(&win, !REVEALED.load(Ordering::Relaxed));
+        if !REVEALED.load(Ordering::Relaxed) {
+            effects::disable_glass(&win);
+        }
         apply_window_icon(&app, &win);
         crate::logbuf::info("词板恢复显示");
     }
