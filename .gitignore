@@ -29,6 +29,11 @@ AGENT-NOTES.md
 # 本地维护的更新日志（只在本地看，不入库）
 CHANGELOG.md
 
+# 卡顿排查记录与采样脚本（临时，修完即删，不入库）
+PERF-ISSUES.md
+scripts/perf-watch.py
+perf-watch-*.csv
+
 # WorkBuddy 工作日志/备忘
 .workbuddy/
 
