@@ -26,6 +26,9 @@ run.log
 # 面向 AI agent 的开发手册（内部文档，不上传仓库）
 AGENT-NOTES.md
 
+# 本地维护的更新日志（只在本地看，不入库）
+CHANGELOG.md
+
 # WorkBuddy 工作日志/备忘
 .workbuddy/
 
