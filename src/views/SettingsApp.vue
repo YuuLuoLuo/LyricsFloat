@@ -102,13 +102,21 @@ const previewDoc = computed<{ lines: LyricLine[]; time: number } | null>(() => {
 })
 
 /**
+ * 预览的这三行里到底有没有译文。翻译开关开着但这首歌词没有译文时，
+ * 预览不该空出译文那一行 —— 词板那边也是这么处理的（LyricStage 的 showTrans）。
+ */
+const previewHasTrans = computed(() =>
+  (previewDoc.value?.lines ?? []).some((l) => (l.trans ?? '').trim() !== ''),
+)
+
+/**
  * 预览条高度跟着字号/行距走：要放下三行，不然第三行会被裁掉。
  * 预览只做排版参考，所以卡在 112~268px 之间，别让它把设置页挤没。
  */
 const previewH = computed(() => {
   const ap = settings.appearance
   const unit = Math.max(ap.lineHeight, ap.fontSize * 1.25)
-  const trans = settings.view.translation ? 1.5 : 1
+  const trans = settings.view.translation && previewHasTrans.value ? 1.5 : 1
   return Math.round(Math.min(268, Math.max(112, unit * trans * 3)))
 })
 
@@ -145,7 +153,7 @@ const previewGlass = computed(() => {
   return { background: `rgba(${rgb}, ${settings.glass.alpha})` }
 })
 
-const showTrans = computed(() => settings.view.translation)
+const showTrans = computed(() => settings.view.translation && previewHasTrans.value)
 
 /** 词板高度能放几行 —— 行数不再让用户手选，由高度和行距决定 */
 const capacity = computed(() => {
@@ -363,8 +371,14 @@ const pinnedLabel = computed(() => {
   return players.value.find((p) => p.id === id)?.name ?? id
 })
 
-/** 「无播放时关闭词板」= 词板可能整个不在，尺寸/背景这些项就没意义了 */
-const parkMode = computed(() => settings.behavior.hideWhenIdle)
+/**
+ * 「无播放时关闭词板」= 词板可能整个不在，尺寸/背景这些项就没意义了。
+ *
+ * 但只有"词板真的不在"时才该禁用：开关开着、此刻又有歌词在放，词板是在屏幕上的，
+ * 调尺寸和背景当场就能看到效果，没理由拦着用户。
+ * 判据跟 App.vue 里 syncPark 停放词板用的是同一个：`hideWhenIdle && !runtime.doc`。
+ */
+const parkMode = computed(() => settings.behavior.hideWhenIdle && !runtime.doc)
 
 function toggleHideWhenIdle(v: boolean) {
   settings.behavior.hideWhenIdle = v

@@ -5,7 +5,7 @@
 透明、无边框、始终置顶，鼠标穿透。歌词跟着系统里正在播放的歌实时滚动，
 
 <p align="center">
-  <a href="https://github.com/YuuLuoLuo/LyricsFloat/releases/latest">
+  <a href="https://github.com/YuuLuoLuo/LyricsFloat/releases/latest/download/LyricsFloat.exe">
     <img alt="下载最新版" src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD%E6%9C%80%E6%96%B0%E7%89%88-Windows%20x64-2ea44f?style=for-the-badge&logo=windows&logoColor=white">
   </a>
 </p>
@@ -53,13 +53,16 @@
 ## 下载与安装
 
 <p align="center">
-  <a href="https://github.com/YuuLuoLuo/LyricsFloat/releases/latest">
-    <img alt="前往 Releases 下载" src="https://img.shields.io/badge/%E5%89%8D%E5%BE%80%20Releases-LyricsFloat%20%E6%9C%80%E6%96%B0%E7%89%88-2ea44f?style=for-the-badge&logo=github&logoColor=white">
+  <a href="https://github.com/YuuLuoLuo/LyricsFloat/releases/latest/download/LyricsFloat.exe">
+    <img alt="下载最新版" src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD%20LyricsFloat.exe-2ea44f?style=for-the-badge&logo=windows&logoColor=white">
   </a>
 </p>
 
-点上面的按钮（或直接打开 [Releases](https://github.com/YuuLuoLuo/LyricsFloat/releases/latest)），
-下载最新版 `LyricsFloat_<版本号>.exe`（例如 `LyricsFloat_26.11_6.exe`）。
+点上面的按钮直接下载最新版 `LyricsFloat.exe`（不需要再进 Releases 页面挑文件）。
+想先看更新了什么，可以打开 [Releases](https://github.com/YuuLuoLuo/LyricsFloat/releases/latest)。
+
+> 产物名固定为 `LyricsFloat.exe`，版本号写在文件属性里：
+> 右键 → 属性 → 详细信息 → `产品版本` / `文件版本`。
 
 1. 放到任意目录双击运行即可，**绿色免安装**，不写注册表（只有开启「开机自动启动」时写一条自启项）。
 2. 首次运行会在 `%APPDATA%\com.yuluo.lyricsfloat\` 生成配置与歌词缓存，卸载时删除该目录即可。
@@ -142,7 +145,7 @@ npm run dev                 # Vite 开发服务器 127.0.0.1:1420
 cargo run --manifest-path src-tauri/Cargo.toml
 
 # 发布构建
-bash scripts/pack.sh        # 产物：release/LyricsFloat_<版本号>.exe
+bash scripts/pack.sh        # 产物：release/LyricsFloat.exe（版本号在文件属性里）
 ```
 
 `scripts/pack.sh` 会依次做前端构建、Rust release 构建并复制成带版本号的文件名。

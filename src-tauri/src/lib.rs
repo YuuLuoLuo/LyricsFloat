@@ -5,12 +5,23 @@ mod logbuf;
 mod lyrics;
 mod player;
 mod settings_io;
+mod startup;
 mod tray;
 mod window;
 
 use tauri::{Manager, WindowEvent};
 
 pub fn run() {
+    // 两道闸都在 tauri 起来之前：没过闸就直接返回，不写日志、不碰配置文件。
+    // 顺序不能反 —— 单实例要先抢，否则第二个进程会跟第一个抢 session.log 和 running.mark。
+    if !startup::acquire_single_instance() {
+        startup::show_already_running();
+        return;
+    }
+    if !startup::check_version_rollback() {
+        return;
+    }
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             window::set_locked,

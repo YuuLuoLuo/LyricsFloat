@@ -17,7 +17,17 @@ const props = withDefaults(
 const a = computed(() => settings.appearance)
 /** 四个样式开关，互相独立 */
 const rotateOn = computed(() => settings.view.rotate)
-const showTrans = computed(() => settings.view.translation)
+/**
+ * 译文只在"这份歌词真的有译文"时才占位。
+ *
+ * 开关开着但整篇没有译文（纯原文歌词、或翻译源没匹配上）时按关闭处理：
+ * 否则每一行下面都空出一条译文行高，行距白白放大 1.5 倍，
+ * 屏幕上能看到的句子反而变少 —— 用户会觉得"开了翻译什么也没变，只是变稀了"。
+ */
+const showTrans = computed(
+  () =>
+    settings.view.translation && props.lines.some((l) => (l.trans ?? '').trim() !== ''),
+)
 const karaokeOn = computed(() => settings.view.karaoke)
 
 /** 左右内边距（.line-inner 的 padding），算可用宽度时要扣掉 */

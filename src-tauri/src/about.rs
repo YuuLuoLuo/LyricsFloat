@@ -16,7 +16,7 @@ const UA: &str = "lyricsfloat-update-check";
 /// 注意：exe 的文件属性（ProductVersion / FileVersion）走的是资源格式里
 /// 的数字四段，写不了下划线，所以 Cargo.toml / tauri.conf.json 里同步写成
 /// `26.11.2`（点号版，语义完全一样），下面 `version_matches_cargo` 测试守着两边不走样。
-pub const APP_VERSION: &str = "26.11_7";
+pub const APP_VERSION: &str = "26.11_8";
 
 #[derive(Serialize, Deserialize)]
 pub struct UpdateInfo {
@@ -171,6 +171,20 @@ fn parse_ver(s: &str) -> Vec<u64> {
     out
 }
 
+/// 按「年份.月份_第几次编译」比大小。启动时的版本回退检查要用。
+pub(crate) fn ver_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let (x, y) = (parse_ver(a), parse_ver(b));
+    for i in 0..x.len().max(y.len()) {
+        let vx = *x.get(i).unwrap_or(&0);
+        let vy = *y.get(i).unwrap_or(&0);
+        match vx.cmp(&vy) {
+            std::cmp::Ordering::Equal => {}
+            other => return other,
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
 fn is_newer(latest: &str, current: &str) -> bool {
     let a = parse_ver(latest);
     let b = parse_ver(current);
@@ -260,6 +274,21 @@ mod tests {
         // 老式语义仍然可用
         assert!(is_newer("0.3.0", "0.2.9"));
         assert!(!is_newer("", "26.11_1"));
+    }
+
+    /// 启动时的版本回退检查靠它：当前版本比记录的低就该拦。
+    #[test]
+    fn orders_versions() {
+        use std::cmp::Ordering;
+        assert_eq!(ver_cmp("26.11_7", "26.11_6"), Ordering::Greater);
+        assert_eq!(ver_cmp("26.11_6", "26.11_7"), Ordering::Less);
+        assert_eq!(ver_cmp("26.11_7", "26.11_7"), Ordering::Equal);
+        // 点号 / 下划线 / v 前缀都等价，别因为写法不同误判成回退
+        assert_eq!(ver_cmp("26.11.7", "26.11_7"), Ordering::Equal);
+        assert_eq!(ver_cmp("v26.11_7", "26.11_7"), Ordering::Equal);
+        // 位不够时补 0：26.11 和 26.11_0 是同一个版本
+        assert_eq!(ver_cmp("26.11", "26.11_0"), Ordering::Equal);
+        assert_eq!(ver_cmp("27.1_1", "26.12_9"), Ordering::Greater);
     }
 
     /// APP_VERSION 和 Cargo.toml 的 package.version 必须对得上，

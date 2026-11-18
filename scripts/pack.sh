@@ -27,9 +27,15 @@ cargo build --release --features custom-protocol --manifest-path src-tauri/Cargo
 
 echo "==> 3/3 复制产物"
 mkdir -p release
-OUT="release/LyricsFloat_${VER}.exe"
+# 产物名固定 LyricsFloat.exe（不再带版本号）：Release 资产名稳定，
+# README 的 /releases/latest/download/LyricsFloat.exe 才能真正"直接下载最新版"。
+# 版本号照样写在 exe 的文件属性里（ProductVersion / FileVersion，来自 Cargo.toml），
+# 右键属性就能看到，也能被自动更新逻辑读到。
+OUT="release/LyricsFloat.exe"
 cp src-tauri/target/release/lyricsfloat.exe "$OUT"
-rm -f release/lyricsfloat.exe release/lyric-board.exe
-# 只留当前版本这一个，release 里不会堆一排旧 exe 让人看花眼
-find release -maxdepth 1 -name '*.exe' ! -name "$(basename "$OUT")" -delete
-echo "完成：$OUT"
+# 注意：Windows 文件名大小写不敏感，这里**不要**再 rm 小写的 lyricsfloat.exe ——
+# 那就是刚复制出来的这个文件，会把产物删掉。只清历史遗留的旧名字。
+rm -f release/lyric-board.exe
+# 清掉旧版留下的带版本号产物，免得 release 里堆一排 exe
+find release -maxdepth 1 -name '*.exe' ! -name "$(basename "$OUT")" -delete 2>/dev/null || true
+echo "完成：$OUT（版本 $VER 已写进文件属性）"
