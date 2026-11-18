@@ -205,9 +205,19 @@ const trackLine = computed(() => {
 })
 
 const lyricState = computed(() => {
-  if (runtime.doc) return `${runtime.doc.lines.length} 行 · ${runtime.source || '未知来源'}`
+  if (runtime.doc) return `${runtime.doc.lines.length} 行`
   if (runtime.loading) return '正在获取歌词…'
   return runtime.notice || '—'
+})
+
+/** 曲库名字统一一下写法：lrclib 是开放曲库的英文名，小写摆着有点突兀 */
+const SOURCE_LABEL: Record<string, string> = { lrclib: 'LRCLIB' }
+
+/** 歌词来源（只做标记，不给链接 —— 曲库页面没有稳定可跳转的地址） */
+const lyricSource = computed(() => {
+  if (!runtime.doc) return ''
+  const s = runtime.source || ''
+  return s ? (SOURCE_LABEL[s] ?? s) : '未知来源'
 })
 
 function fmtTime(sec: number): string {
@@ -824,6 +834,16 @@ onBeforeUnmount(() => {
               <span class="lbl">歌词</span>
               <div class="grow muted">{{ lyricState }}</div>
             </div>
+            <div class="row">
+              <span class="lbl">来源</span>
+              <div class="grow">
+                <span v-if="lyricSource" class="srcbadge">{{ lyricSource }}</span>
+                <span v-else class="muted">—</span>
+              </div>
+            </div>
+            <p v-if="lyricSource" class="hint">
+              歌词来自第三方曲库，可能存在错字、缺句或时间轴偏差；整体快了慢了可用下方「时间偏移」微调。
+            </p>
             <div class="row">
               <span class="lbl">进度</span>
               <div class="grow muted mono">{{ progressText }}</div>
@@ -1504,6 +1524,18 @@ section > h3:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 歌词来源：纯标记，不是按钮 —— 不做 hover，也不给可点的暗示 */
+.srcbadge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .path {
