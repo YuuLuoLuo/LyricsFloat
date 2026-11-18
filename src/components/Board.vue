@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import LyricStage from './LyricStage.vue'
 import { settings, runtime, glassVisible } from '../core/store'
 import {
@@ -102,6 +102,26 @@ onBeforeUnmount(() => {
 
 const stageDoc = computed(() => runtime.doc)
 
+/**
+ * 舞台时间。歌词加载期间（换歌了但新歌词还没拉回来）冻住不动。
+ *
+ * 新歌词要联网拉，没播放过的歌要 1~2 秒，这期间 `runtime.doc` 还是上一首的。
+ * 若让时间继续走，旧歌词会跟着新歌的进度往上滚 —— 看着就像"歌词根本没换，
+ * 只是在乱滚"。冻住之后旧歌词原地停着，等新 doc 到位再一次性切过去。
+ *
+ * `loadLyric` 里 `runtime.doc = ...` 和 `runtime.loading = false` 是同一段同步代码，
+ * 中间没有 await，所以不存在"新 doc 已经上了、loading 还是 true"的中间帧：
+ * 渲染时两者总是一起变，doc 一换时间就跟着恢复。
+ * 加载失败或没有歌词时 loading 也会变 false，不会把自己冻死。
+ */
+const stageTime = ref(runtime.time)
+watch(
+  () => [runtime.time, runtime.loading] as const,
+  ([t, loading]) => {
+    if (!loading) stageTime.value = t
+  },
+)
+
 /* ------------------------------------------------------------ 歌词信息 */
 
 /**
@@ -168,7 +188,7 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
       </div>
 
       <div class="stage-wrap">
-        <LyricStage v-if="stageDoc" :lines="stageDoc.lines" :time="runtime.time" />
+        <LyricStage v-if="stageDoc" :lines="stageDoc.lines" :time="stageTime" />
         <div v-else class="empty">
           <div class="empty-text">{{ runtime.loading ? '正在获取歌词…' : runtime.notice }}</div>
         </div>
