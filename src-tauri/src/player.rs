@@ -121,10 +121,6 @@ pub struct NowPlaying {
     pub fresh: bool,
 }
 
-/// 媒体属性兜底重读周期（拍）。40 拍 ≈ 10 秒。
-/// 正常换歌由「时长变了 / 进度跳回开头 / 换了播放器」当拍触发，这个只防上报异常的情况。
-const PROPS_RECHECK_TICKS: u32 = 40;
-
 /// 暂停位置的状态机。
 ///
 /// 播放器在暂停那一刻不一定刷新 timeline：`Position` 还是「上次更新那一刻」的值，
@@ -140,19 +136,6 @@ struct PauseState {
     frozen: Option<f64>,
     /// 上一拍是否在播
     was_playing: bool,
-    /// 上一次成功读到的（歌名, 歌手, 专辑）。
-    ///
-    /// 媒体属性走的是异步 API，不能每拍读（见下方 `need_props` 处的注释），
-    /// 所以平时都用这份缓存，只在换歌时刷新。
-    props: Option<(String, String, String)>,
-    /// 上次读属性时那条会话的 AUMID（换播放器判据）
-    props_app: String,
-    /// 上次读属性时的曲目总时长（换歌判据：换歌必然换时长）
-    props_end: f64,
-    /// 距上次读属性过了多少拍（兜底重读）
-    props_ticks: u32,
-    /// 已经尝试读过属性。读失败也算"试过"，否则会每拍重试把泄漏搬回来。
-    props_tried: bool,
 }
 
 #[cfg(windows)]
@@ -537,59 +520,36 @@ fn read_snapshot(st: &mut PauseState) -> Option<NowPlaying> {
         .map(|v| v.Duration as f64 / 1e7)
         .unwrap_or(0.0);
 
-    // ---- 媒体属性：只在"可能换歌"时才读 ----
+    // ---- 媒体属性：每拍读 ----
     //
-    // `TryGetMediaPropertiesAsync` 跟 `Manager::RequestAsync` 一样是 WinRT 异步 API：
-    // 每次调用都要经 SHCORE 投递到线程池，每次都会留下线程且不回收。原先这里每拍读一次
-    // （每秒 4 次），跟每拍的 `RequestAsync` 一起把主进程线程堆到上千个、CPU 吃到 5 个核。
-    // 换歌的信号全都在同步可读的时间线里，所以改成按需：
-    //   - 换了播放器（AUMID 变）
-    //   - 曲目总时长变了（换歌必然换时长）
-    //   - 进度跳回前面（换歌 / 拖进度条回退）
-    //   - 兜底：每 10 秒无论如何重读一次
-    st.props_ticks = st.props_ticks.saturating_add(1);
-    let app_changed = st.props_app != aumid;
-    let end_changed = st.props_end > 0.0 && end > 0.0 && (end - st.props_end).abs() > 1.0;
-    let pos_back = st.last_raw > 0.0 && raw < st.last_raw - 3.0;
-    let need_props = !st.props_tried
-        || app_changed
-        || end_changed
-        || pos_back
-        || st.props_ticks >= PROPS_RECHECK_TICKS;
+    // 曾经为了"省开销"把这里改成"只在时长变了/进度回退了才读"，结果切歌当场翻车：
+    // 换歌那一瞬 SMTC 的 timeline 往往还没刷新（position 还是上一首的、时长也还是旧的），
+    // 三个判据一个都不成立，只能等 10 秒兜底 —— 表现就是"切歌后歌词不换，
+    // 要等新歌第一句出来才变"。
+    //
+    // 实测过这笔开销到底有多大：`TryGetMediaPropertiesAsync` 跑 600 次线程只涨 2 个
+    // （0.0033 次/次，而且会饱和），真正的泄漏源是 `Manager::RequestAsync`
+    // （0.03 次/次），那个已经改成只取一次了。所以这里**每拍读，别省**。
+    let props = session.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
+    let title = props.Title().map(|s| s.to_string()).unwrap_or_default();
+    let artist = props.Artist().map(|s| s.to_string()).unwrap_or_default();
+    let album = props.AlbumTitle().map(|s| s.to_string()).unwrap_or_default();
 
-    if need_props {
-        // 先在无条件下记一笔：这一拍已经试过读过属性。
-        // 读失败也记，否则下一拍 `need_props` 又成立 → 每拍重试 → 泄漏原路返回。
-        st.props_tried = true;
-        st.props_ticks = 0;
-        st.props_app = aumid;
-        st.props_end = end;
-
-        if let Ok(props) = session.TryGetMediaPropertiesAsync().and_then(|o| o.get()) {
-            let title = props.Title().map(|s| s.to_string()).unwrap_or_default();
-            let artist = props.Artist().map(|s| s.to_string()).unwrap_or_default();
-            let album = props.AlbumTitle().map(|s| s.to_string()).unwrap_or_default();
-            st.props = Some((title.clone(), artist.clone(), album));
-
-            // 换歌就抓一次封面；取不到也缓存空串，同一首歌不反复开流
-            let key = cover_key(&title, &artist);
-            let need_cover = match COVER.lock() {
-                Ok(g) => !matches!(g.as_ref(), Some((k, _)) if *k == key),
-                Err(_) => false,
-            };
-            if need_cover {
-                let data = grab_cover(&props).unwrap_or_default();
-                if let Ok(mut g) = COVER.lock() {
-                    *g = Some((key, data));
-                }
-            }
-        }
-        // 读失败就沿用上一份缓存 —— 宁可晚一拍更新，也别让词板闪一下空白
-    }
-
-    let (title, artist, album) = st.props.clone()?;
     if title.is_empty() {
         return None;
+    }
+
+    // 换歌就抓一次封面；取不到也缓存空串，同一首歌不反复开流
+    let key = cover_key(&title, &artist);
+    let need_cover = match COVER.lock() {
+        Ok(g) => !matches!(g.as_ref(), Some((k, _)) if *k == key),
+        Err(_) => false,
+    };
+    if need_cover {
+        let data = grab_cover(&props).unwrap_or_default();
+        if let Ok(mut g) = COVER.lock() {
+            *g = Some((key, data));
+        }
     }
 
     let (position, duration, fresh) = match tl {
