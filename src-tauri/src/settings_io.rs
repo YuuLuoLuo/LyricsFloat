@@ -164,16 +164,71 @@ pub fn settings_export(json: String) -> String {
     };
     let stamp = timestamp();
     let path = dir.join(format!("LyricsFloat设置-{stamp}.json"));
-    // 导出的是"给人看的备份"，包一层 schema 方便以后校验；导入时两种形态都认
-    let body = match serde_json::from_str::<serde_json::Value>(&json) {
-        Ok(v) => serde_json::json!({ "schema": SCHEMA, "settings": v }),
-        Err(_) => return String::new(),
+    let Some(text) = export_body(&json) else {
+        return String::new();
     };
-    let text = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
     match fs::write(&path, text) {
         Ok(()) => path.to_string_lossy().to_string(),
         Err(_) => String::new(),
     }
+}
+
+/// 导出文件的正文：包一层 schema 方便以后校验；导入时两种形态都认
+fn export_body(json: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let body = serde_json::json!({ "schema": SCHEMA, "settings": v });
+    Some(serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string()))
+}
+
+/// 导出设置：弹系统的「另存为」，让用户自己选位置。返回写出的路径，取消返回空串。
+#[tauri::command]
+pub fn settings_export_dialog(json: String) -> String {
+    let Some(text) = export_body(&json) else {
+        return String::new();
+    };
+    let Some(path) = pick_save_path(&format!("LyricsFloat设置-{}.json", timestamp())) else {
+        return String::new();
+    };
+    match fs::write(&path, text) {
+        Ok(()) => path.to_string_lossy().to_string(),
+        Err(e) => {
+            crate::logbuf::error(&format!("导出设置失败：{e}"));
+            String::new()
+        }
+    }
+}
+
+/// 导入设置：弹系统的「打开」，返回选中的文件路径（取消返回 None）
+#[tauri::command]
+pub fn settings_pick_import() -> Option<String> {
+    pick_open_path()
+}
+
+/// 实际在用的数据目录：优先 settings.json 的父目录。
+/// APPDATA 被策略锁死时会退回 exe 目录，那时 report 的和 open 的必须是同一个地方，
+/// 所以两个命令都走这里。
+fn data_dir() -> Option<PathBuf> {
+    settings_path()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .or_else(appdata_dir)
+}
+
+/// 软件数据目录（设置、歌词缓存、日志都在它下面）
+#[tauri::command]
+pub fn data_dir_cmd() -> String {
+    data_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+/// 在资源管理器里打开数据目录
+#[tauri::command]
+pub fn open_data_dir() -> bool {
+    let Some(dir) = data_dir() else {
+        return false;
+    };
+    let _ = fs::create_dir_all(&dir);
+    open_in_explorer(&dir)
 }
 
 /// 读任意路径的备份文件（拖进设置窗口时用）。
@@ -206,6 +261,119 @@ fn desktop_dir() -> Option<PathBuf> {
 #[cfg(not(target_os = "windows"))]
 fn desktop_dir() -> Option<PathBuf> {
     None
+}
+
+// ---------------------------------------------------------------- 文件对话框
+
+/// 系统的「另存为」。
+///
+/// 用 Win32 的 GetSaveFileNameW（comdlg32），不为一个对话框引 tauri-plugin-dialog ——
+/// 那个插件还要配权限、加前端包，为一个按钮不值。
+#[cfg(target_os = "windows")]
+fn pick_save_path(default_name: &str) -> Option<PathBuf> {
+    use windows::core::{PCWSTR, PWSTR};
+    use windows::Win32::UI::Controls::Dialogs::{
+        GetSaveFileNameW, OFN_HIDEREADONLY, OFN_OVERWRITEPROMPT, OFN_PATHMUSTEXIST, OPENFILENAMEW,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+
+    // 双 \0 结尾：一个结束最后一项，一个结束整个过滤器表
+    let filter: Vec<u16> = "设置文件 (*.json)\0*.json\0所有文件 (*.*)\0*.*\0\0"
+        .encode_utf16()
+        .collect();
+    let title: Vec<u16> = "导出设置文件\0".encode_utf16().collect();
+
+    let mut buf = vec![0u16; 1024];
+    for (i, u) in default_name.encode_utf16().enumerate() {
+        if i + 1 < buf.len() {
+            buf[i] = u;
+        }
+    }
+
+    let mut ofn: OPENFILENAMEW = unsafe { std::mem::zeroed() };
+    ofn.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
+    // 挂在前台窗口上，对话框才会压在设置页前面而不是藏在后面
+    ofn.hwndOwner = unsafe { GetForegroundWindow() };
+    ofn.lpstrFilter = PCWSTR(filter.as_ptr());
+    ofn.lpstrFile = PWSTR(buf.as_mut_ptr());
+    ofn.nMaxFile = buf.len() as u32;
+    ofn.lpstrTitle = PCWSTR(title.as_ptr());
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+
+    if !unsafe { GetSaveFileNameW(&mut ofn) }.as_bool() {
+        return None; // 用户取消
+    }
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    let s = String::from_utf16_lossy(&buf[..len]);
+    (!s.is_empty()).then(|| PathBuf::from(s))
+}
+
+#[cfg(target_os = "windows")]
+fn pick_open_path() -> Option<String> {
+    use windows::core::{PCWSTR, PWSTR};
+    use windows::Win32::UI::Controls::Dialogs::{
+        GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_HIDEREADONLY, OFN_PATHMUSTEXIST, OPENFILENAMEW,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+
+    let filter: Vec<u16> = "设置文件 (*.json)\0*.json\0所有文件 (*.*)\0*.*\0\0"
+        .encode_utf16()
+        .collect();
+    let title: Vec<u16> = "导入设置文件\0".encode_utf16().collect();
+
+    let mut buf = vec![0u16; 1024];
+    let mut ofn: OPENFILENAMEW = unsafe { std::mem::zeroed() };
+    ofn.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
+    ofn.hwndOwner = unsafe { GetForegroundWindow() };
+    ofn.lpstrFilter = PCWSTR(filter.as_ptr());
+    ofn.lpstrFile = PWSTR(buf.as_mut_ptr());
+    ofn.nMaxFile = buf.len() as u32;
+    ofn.lpstrTitle = PCWSTR(title.as_ptr());
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+
+    if !unsafe { GetOpenFileNameW(&mut ofn) }.as_bool() {
+        return None;
+    }
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    let s = String::from_utf16_lossy(&buf[..len]);
+    (!s.is_empty()).then_some(s)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn pick_save_path(_default_name: &str) -> Option<PathBuf> {
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+fn pick_open_path() -> Option<String> {
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn open_in_explorer(dir: &Path) -> bool {
+    use windows::core::{PCWSTR, HSTRING};
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let verb = HSTRING::from("open");
+    let target = HSTRING::from(dir.to_string_lossy().as_ref());
+    // 返回值 > 32 才算成功（ShellExecuteW 的老约定）
+    let ret = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(verb.as_ptr()),
+            PCWSTR(target.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    ret.0 as isize > 32
+}
+
+#[cfg(not(target_os = "windows"))]
+fn open_in_explorer(_dir: &Path) -> bool {
+    false
 }
 
 /// 本地时间戳 YYYYMMDD-HHMM，纯手算避免为一个文件名引入 chrono。

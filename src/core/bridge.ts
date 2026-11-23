@@ -174,6 +174,26 @@ export function settingsExportFile(json: string) {
   return call<string>('settings_export', { json })
 }
 
+/** 导出设置：弹系统的「另存为」让用户选位置，返回写出的路径（取消返回空串） */
+export function settingsExportDialog(json: string) {
+  return call<string>('settings_export_dialog', { json })
+}
+
+/** 导入设置：弹系统的「打开」让用户选文件，返回选中的路径（取消返回 null） */
+export function settingsPickImport() {
+  return call<string | null>('settings_pick_import')
+}
+
+/** 软件数据目录（设置、歌词缓存、日志都在它下面） */
+export function dataDir() {
+  return call<string>('data_dir_cmd')
+}
+
+/** 在资源管理器里打开数据目录 */
+export function openDataDir() {
+  return call<boolean>('open_data_dir')
+}
+
 /** 读一个备份文件（拖进窗口时用），返回文件文本 */
 export function settingsImportFile(path: string) {
   return call<string | null>('settings_import_file', { path })

@@ -1,6 +1,6 @@
 [package]
 name = "lyricsfloat"
-version = "26.11.12"
+version = "26.11.13"
 description = "LyricsFloat — 桌面悬浮歌词：全透明、鼠标穿透、悬停显形"
 license = "MIT"
 authors = ["羽洛洛 (YuLuo)"]
@@ -25,6 +25,7 @@ windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Controls",
+    "Win32_UI_Controls_Dialogs",
     "Win32_UI_HiDpi",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",

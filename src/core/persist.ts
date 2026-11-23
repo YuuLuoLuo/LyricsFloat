@@ -10,7 +10,14 @@
  * 绿色版把 exe + json 一起拷走，就是完整的配置。
  */
 
-import { isTauri, settingsExportFile, settingsImportFile, settingsLoadFile, settingsPath, settingsSaveFile } from './bridge'
+import {
+  isTauri,
+  settingsExportDialog,
+  settingsImportFile,
+  settingsLoadFile,
+  settingsPath,
+  settingsSaveFile,
+} from './bridge'
 import { adoptSettings, hasLocalSettings, saveSettings, setFileWriter, settingsSnapshot } from './store'
 
 let ready = false
@@ -79,11 +86,10 @@ export async function initSettingsFile(): Promise<void> {
   if (!text) void settingsSaveFile(settingsSnapshot())
 }
 
-/** 导出一份到桌面，返回路径；失败返回空串 */
-export async function exportSettingsToDesktop(): Promise<string> {
+/** 导出设置：弹系统的「另存为」让用户选位置，返回写出的路径；取消返回空串 */
+export async function exportSettingsFile(): Promise<string> {
   saveSettings()
-  const p = await settingsExportFile(settingsSnapshot())
-  return p || ''
+  return (await settingsExportDialog(settingsSnapshot())) || ''
 }
 
 /** 从某个 json 文件导入设置 */

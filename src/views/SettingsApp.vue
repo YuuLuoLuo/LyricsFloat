@@ -6,7 +6,7 @@ import { settings, runtime, saveSettings, resetSettings, pullSettings } from '..
 import { clock } from '../core/clock'
 import { findLineIndex } from '../core/parser'
 import { initPlayer, reapplyOffset } from '../core/player'
-import { exportSettingsToDesktop, importSettingsFile, initSettingsFile, settingsFilePath } from '../core/persist'
+import { exportSettingsFile, importSettingsFile, initSettingsFile } from '../core/persist'
 import { ABOUT } from '../core/about'
 import type { LyricLine } from '../core/types'
 import type { PlayerInfo } from '../core/bridge'
@@ -16,6 +16,7 @@ import {
   checkUpdate,
   clearLyricCache,
   closeSettingsWindow,
+  dataDir,
   exportLog,
   getAutostart,
   isTauri,
@@ -24,6 +25,7 @@ import {
   listPlayers,
   minimizeSelf,
   onFileDrop,
+  openDataDir,
   openUrl,
   peekBoard,
   quitApp,
@@ -33,6 +35,7 @@ import {
   setLocked,
   setPlayerPin,
   setPlayerPref,
+  settingsPickImport,
   startDragging,
 } from '../core/bridge'
 
@@ -492,7 +495,7 @@ async function onTitleDown(e: PointerEvent) {
 
 /* --------------------------------------------------------- 配置导入导出 */
 
-const pathText = ref('')
+const dataPath = ref('')
 const toast = ref('')
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -504,37 +507,24 @@ function say(msg: string): void {
   }, 4200)
 }
 
-async function copyPath(): Promise<void> {
-  if (!pathText.value) return
-  try {
-    await navigator.clipboard.writeText(pathText.value)
-    say('路径已复制')
-  } catch {
-    // WebView 里偶尔没有剪贴板权限，退回到 textarea + execCommand
-    const ta = document.createElement('textarea')
-    ta.value = pathText.value
-    ta.style.position = 'fixed'
-    ta.style.opacity = '0'
-    document.body.appendChild(ta)
-    ta.select()
-    try {
-      document.execCommand('copy')
-      say('路径已复制')
-    } catch {
-      say('复制失败，请手动选中')
-    }
-    ta.remove()
-  }
-}
-
-/** 导入没有文件选择框（不引额外插件），靠把 json 拖进窗口 */
-function hintImport(): void {
-  say('把 .json 设置文件拖进窗口即可导入')
+/** 在资源管理器里打开数据目录 */
+function openDataFolder(): void {
+  void openDataDir().then((ok) => {
+    if (!ok) say('打不开数据文件夹')
+  })
 }
 
 async function doExport(): Promise<void> {
-  const p = await exportSettingsToDesktop()
-  say(p ? `已导出到 ${p}` : '导出失败：桌面不可写')
+  const p = await exportSettingsFile()
+  // 空串 = 用户在另存为里取消了，不是失败，不用弹提示
+  if (p) say(`已导出到 ${p}`)
+}
+
+/** 点「导入设置文件」：弹系统的打开对话框 */
+async function doPickImport(): Promise<void> {
+  const file = await settingsPickImport()
+  if (!file) return
+  await doImport(file)
 }
 
 async function doImport(file: string): Promise<void> {
@@ -743,7 +733,7 @@ onMounted(async () => {
 
   // 设置文件 + 系统字体列表
   await initSettingsFile()
-  pathText.value = settingsFilePath()
+  dataPath.value = (await dataDir()) || ''
   const list = await listFonts()
   if (list && list.length) {
     const merged = new Set<string>(list)
@@ -884,18 +874,19 @@ onBeforeUnmount(() => {
               <button class="mini" @click="resetPos">移回屏幕中央</button>
             </div>
 
-            <h3>设置文件</h3>
+            <h3>设置项</h3>
             <div class="row">
-              <span class="lbl">位置</span>
-              <div class="grow path mono" :title="pathText">{{ pathText || '（浏览器预览无文件）' }}</div>
-              <button class="mini" @click="copyPath">复制</button>
+              <span class="lbl">数据文件夹</span>
+              <div class="grow path mono" :title="dataPath">
+                {{ dataPath || '（浏览器预览无目录）' }}
+              </div>
+              <button class="mini" @click="openDataFolder">打开</button>
             </div>
-            <p class="hint">把导出的设置文件拖进窗口即可导入。</p>
+            <p class="hint">设置、歌词缓存和日志都在这里。也可以把导出的设置文件拖进窗口导入。</p>
             <div class="danger-zone">
-              <button class="ghost" @click="doExport">导出到桌面</button>
-              <button class="ghost" @click="hintImport">导入…</button>
+              <button class="ghost" @click="doExport">导出设置文件</button>
+              <button class="ghost" @click="doPickImport">导入设置文件</button>
               <button class="ghost" @click="resetSettings">恢复默认</button>
-              <button class="danger" @click="quit">退出 LyricsFloat</button>
             </div>
 
             <h3>歌词缓存</h3>
@@ -910,6 +901,11 @@ onBeforeUnmount(() => {
             </p>
             <div class="danger-zone">
               <button class="ghost" @click="doExportLog">导出日志</button>
+            </div>
+
+            <!-- 退出单独放在最底下，和"恢复默认"这类不退出进程的按钮分开 -->
+            <div class="quitrow">
+              <button class="danger" @click="quit">退出 LyricsFloat</button>
             </div>
           </section>
 
@@ -2163,8 +2159,16 @@ section > h3:first-child {
 
 .danger-zone {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 22px;
+}
+
+/* 退出单独一行放在最底下：它和"恢复默认"这类不退出进程的操作不是一回事 */
+.quitrow {
+  margin-top: 26px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .ghost,

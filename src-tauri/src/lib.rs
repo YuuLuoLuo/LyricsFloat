@@ -57,6 +57,10 @@ pub fn run() {
             settings_io::settings_load,
             settings_io::settings_save,
             settings_io::settings_export,
+            settings_io::settings_export_dialog,
+            settings_io::settings_pick_import,
+            settings_io::data_dir_cmd,
+            settings_io::open_data_dir,
             settings_io::settings_import_file,
         ])
         .setup(|app| {
