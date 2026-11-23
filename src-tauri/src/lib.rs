@@ -45,6 +45,8 @@ pub fn run() {
             autostart::get_autostart,
             autostart::set_autostart,
             lyrics::fetch_lyric,
+            lyrics::last_candidates,
+            lyrics::clear_lyric_cache,
             player::now_playing,
             player::now_cover,
             player::list_players,
