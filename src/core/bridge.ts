@@ -359,7 +359,7 @@ export async function listPlayers(): Promise<PlayerInfo[]> {
   return res ?? []
 }
 
-/** 指定歌词来源播放器；空串 = 自动 */
+/** 指定播放来源播放器；空串 = 自动 */
 export async function setPlayerPref(id: string): Promise<void> {
   await call('set_player_pref', { id })
 }

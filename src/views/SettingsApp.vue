@@ -216,7 +216,7 @@ const lyricState = computed(() => {
 /** 曲库名字统一一下写法：lrclib 是开放曲库的英文名，小写摆着有点突兀 */
 const SOURCE_LABEL: Record<string, string> = { lrclib: 'LRCLIB' }
 
-/** 歌词来源（只做标记，不给链接 —— 曲库页面没有稳定可跳转的地址） */
+/** 歌词源（只做标记，不给链接 —— 曲库页面没有稳定可跳转的地址） */
 const lyricSource = computed(() => {
   if (!runtime.doc) return ''
   const s = runtime.source || ''
@@ -653,7 +653,7 @@ onMounted(async () => {
   window.addEventListener('storage', onStorage)
   syncTimer = setInterval(pullSettings, 900)
 
-  // 歌词来源偏好推给 Rust（词板窗口也会推，两边都推才不会互相覆盖）
+  // 播放来源偏好推给 Rust（词板窗口也会推，两边都推才不会互相覆盖）
   await setPlayerPref(settings.lyric.player)
   await setPlayerPin(settings.lyric.pinPlayer)
   await refreshPlayers()
@@ -832,7 +832,7 @@ onBeforeUnmount(() => {
               <div class="grow muted">{{ playerLabel }}</div>
             </div>
             <div class="row">
-              <span class="lbl">歌词来源</span>
+              <span class="lbl">播放来源</span>
               <div class="chips grow" :class="{ off: settings.lyric.pinPlayer }">
                 <button
                   class="chip"
@@ -1605,7 +1605,7 @@ section > h3:first-child {
   white-space: nowrap;
 }
 
-/* 歌词来源：纯标记，不是按钮 —— 不做 hover，也不给可点的暗示 */
+/* 歌词源：纯标记，不是按钮 —— 不做 hover，也不给可点的暗示 */
 .srcbadge {
   display: inline-block;
   padding: 1px 8px;

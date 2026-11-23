@@ -430,7 +430,7 @@ pub fn set_player_pref(id: String) {
         *g = next.clone();
     }
     crate::logbuf::info(&format!(
-        "歌词来源 → {}",
+        "播放来源 → {}",
         next.clone().unwrap_or_else(|| "自动".into())
     ));
 }

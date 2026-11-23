@@ -66,7 +66,7 @@ export interface AppSettings {
   lyric: {
     offsetMs: number
     /**
-     * 歌词来源播放器（SMTC 的 AUMID）。空串 = 自动：谁在播就用谁。
+     * 播放来源播放器（SMTC 的 AUMID）。空串 = 自动：谁在播就用谁。
      * 存 AUMID 而不是显示名，播放器改名/换语言也不影响对应关系。
      */
     player: string

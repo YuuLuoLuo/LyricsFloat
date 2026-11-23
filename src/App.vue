@@ -77,7 +77,7 @@ watch(
 
 watch(() => [settings.behavior.hideWhenIdle, !!runtime.doc], syncPark)
 
-// 歌词来源：词板窗口也推一次，保证「只开词板、不打开设置」时偏好同样生效
+// 播放来源：词板窗口也推一次，保证「只开词板、不打开设置」时偏好同样生效
 watch(
   () => settings.lyric.player,
   (v) => void setPlayerPref(v),
