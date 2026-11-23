@@ -10,13 +10,16 @@ import { exportSettingsToDesktop, importSettingsFile, initSettingsFile, settings
 import { ABOUT } from '../core/about'
 import type { LyricLine } from '../core/types'
 import type { PlayerInfo } from '../core/bridge'
+import type { CandidateBoard } from '../core/bridge'
 import {
   appVersion,
   checkUpdate,
+  clearLyricCache,
   closeSettingsWindow,
   exportLog,
   getAutostart,
   isTauri,
+  lastCandidates,
   listFonts,
   listPlayers,
   minimizeSelf,
@@ -219,6 +222,44 @@ const lyricSource = computed(() => {
   const s = runtime.source || ''
   return s ? (SOURCE_LABEL[s] ?? s) : '未知来源'
 })
+
+/* ------------------------------------------------------------- 歌词源 */
+
+/** 三个曲库。id 与 Rust 侧一致；空串（自动）在模板里单独一个按钮 */
+const SOURCES = [
+  { id: 'netease', name: '网易云', note: '中文曲库大，无版权时只剩翻唱' },
+  { id: 'lrclib', name: 'LRCLIB', note: '开放曲库，欧美与经典曲目最全' },
+  { id: 'lrccx', name: 'lrc.cx', note: '酷狗镜像，中文冷门歌兜底' },
+]
+
+const board = ref<CandidateBoard | null>(null)
+
+async function refreshBoard(): Promise<void> {
+  if (!isTauri) return
+  board.value = await lastCandidates()
+}
+
+/** 只显示当前这首歌的候选：Rust 那边切歌后会整份换掉清单 */
+const candList = computed(() => {
+  const b = board.value
+  if (!b) return []
+  if (b.track !== `${runtime.trackTitle}\u0001${runtime.trackArtist}`) return []
+  return b.items
+    .filter((c) => c.score >= 30 || c.chosen)
+    .slice()
+    .sort((a, b2) => b2.score - a.score)
+    .slice(0, 8)
+})
+
+/**
+ * 切换歌词曲库。设置存下就够了 —— 词板和设置页的播放循环
+ * 每拍都会比对 `settings.lyric.source`，发现变了就自己重取这首。
+ */
+function pickSource(id: string): void {
+  settings.lyric.source = id
+  saveSettings()
+}
+
 
 function fmtTime(sec: number): string {
   const t = Math.max(0, Math.floor(sec))
@@ -571,7 +612,11 @@ watch(
     }
     if (v !== 'lyrics') return
     void refreshPlayers()
-    playerTimer = setInterval(() => void refreshPlayers(), 2000)
+    void refreshBoard()
+    playerTimer = setInterval(() => {
+      void refreshPlayers()
+      void refreshBoard()
+    }, 2000)
   },
   { immediate: true },
 )
@@ -835,16 +880,6 @@ onBeforeUnmount(() => {
               <div class="grow muted">{{ lyricState }}</div>
             </div>
             <div class="row">
-              <span class="lbl">来源</span>
-              <div class="grow">
-                <span v-if="lyricSource" class="srcbadge">{{ lyricSource }}</span>
-                <span v-else class="muted">—</span>
-              </div>
-            </div>
-            <p v-if="lyricSource" class="hint">
-              歌词来自第三方曲库，可能存在错字、缺句或时间轴偏差；整体快了慢了可用下方「时间偏移」微调。
-            </p>
-            <div class="row">
               <span class="lbl">进度</span>
               <div class="grow muted mono">{{ progressText }}</div>
             </div>
@@ -852,6 +887,50 @@ onBeforeUnmount(() => {
               <span class="lbl">时钟</span>
               <div class="grow muted mono">{{ clockText }}</div>
             </div>
+
+            <h3>歌词源</h3>
+            <div class="row">
+              <span class="lbl">当前</span>
+              <div class="grow">
+                <span v-if="lyricSource" class="srcbadge">{{ lyricSource }}</span>
+                <span v-else-if="runtime.loading" class="muted">正在获取…</span>
+                <span v-else class="muted">{{ runtime.notice || '无可用歌词' }}</span>
+              </div>
+            </div>
+            <div class="chips srcpick">
+              <button class="chip" :class="{ on: !settings.lyric.source }" @click="pickSource('')">
+                自动
+              </button>
+              <button
+                v-for="s in SOURCES"
+                :key="s.id"
+                class="chip"
+                :class="{ on: settings.lyric.source === s.id }"
+                :title="s.note"
+                @click="pickSource(s.id)"
+              >
+                {{ s.name }}
+              </button>
+            </div>
+            <p v-if="settings.lyric.source && !runtime.loading && !runtime.doc" class="hint">
+              当前词源无可用歌词
+            </p>
+
+            <div v-if="candList.length" class="candbox">
+              <div v-for="(c, i) in candList" :key="i" class="cand" :class="{ cur: c.chosen }">
+                <span class="csrc">{{ c.source }}</span>
+                <span class="cname" :title="c.title">{{ c.title || '未知曲目' }}</span>
+                <span class="cart" :title="c.artist">{{ c.artist || '未知歌手' }}</span>
+                <span class="cdur">{{ c.duration > 1 ? fmtTime(c.duration) : '—' }}</span>
+                <span class="ctag" :class="{ off: !c.synced }">
+                  {{ c.synced ? '时间轴' : '纯文本' }}
+                </span>
+              </div>
+            </div>
+            <p v-else class="hint">还没有搜索结果。</p>
+            <p v-if="lyricSource" class="hint">
+              歌词来自第三方曲库，可能存在错字、缺句或时间轴偏差；整体快了慢了可用下方「时间偏移」微调。
+            </p>
 
             <h3>同步</h3>
             <div class="row">
@@ -1536,6 +1615,68 @@ section > h3:first-child {
   font-size: 11.5px;
   line-height: 1.6;
   color: rgba(255, 255, 255, 0.6);
+}
+
+/* 歌词源：曲库切换 + 候选清单 */
+.srcpick {
+  margin-top: 7px;
+}
+
+.candbox {
+  margin: 8px 0 4px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.cand {
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1.5fr) minmax(0, 1fr) 46px 48px;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 9px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.54);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.cand:first-child {
+  border-top: 0;
+}
+
+/* 真正用上的那条 */
+.cand.cur {
+  background: rgba(127, 212, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.csrc {
+  color: rgba(255, 255, 255, 0.38);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cand.cur .csrc {
+  color: #7fd4ff;
+}
+
+.cname,
+.cart {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cdur,
+.ctag {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ctag.off {
+  color: rgba(255, 255, 255, 0.26);
 }
 
 .path {

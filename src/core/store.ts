@@ -72,6 +72,12 @@ export interface AppSettings {
     player: string
     /** 锁定已选择的播放器：它退出后不退回自动，读不到就当没有播放 */
     pinPlayer: boolean
+    /**
+     * 歌词曲库。空串 = 自动（三源打分取最优），
+     * 其余为词源 id：netease / lrclib / lrccx。
+     * 手动指定后只用那一个源，它没歌词就是没歌词，不再跨源兜底。
+     */
+    source: string
   }
 }
 
@@ -101,7 +107,7 @@ export const DEFAULTS: AppSettings = {
   glass: { tint: '#14141a', alpha: 0.42 },
   behavior: { autostart: false, alwaysOnTop: true, locked: false, hideWhenIdle: false },
   info: { show: false, pos: 'top', cover: 'left', text: 'left' },
-  lyric: { offsetMs: 0, player: '', pinPlayer: false },
+  lyric: { offsetMs: 0, player: '', pinPlayer: false, source: '' },
 }
 
 const KEY = 'lyricsfloat.settings.v3'
@@ -310,6 +316,8 @@ export interface Runtime {
   /** 当前曲目封面（data URL），取不到时为空串 */
   trackCover: string
   source: string
+  /** 当前歌词来自哪个曲库（netease / lrclib / lrccx） */
+  sourceId: string
   /** 没有播放器 / 找不到歌词时的提示 */
   notice: string
   /** 右键菜单是否展开（仅词板窗口） */
@@ -332,6 +340,7 @@ export const runtime = reactive<Runtime>({
   trackApp: '',
   trackCover: '',
   source: '',
+  sourceId: '',
   notice: '',
   menuOpen: false,
 })

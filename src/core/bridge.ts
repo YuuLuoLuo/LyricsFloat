@@ -33,12 +33,50 @@ export interface LyricPayload {
   trans: string
   yrc: string
   source: string
+  source_id: string
   matched_title: string
   matched_artist: string
 }
 
-export function fetchLyric(title: string, artist: string, duration: number) {
-  return call<LyricPayload | null>('fetch_lyric', { title, artist, duration })
+/** 词源偏好：空串 = 自动（三源打分取最优），其余只查指定源 */
+export function fetchLyric(title: string, artist: string, duration: number, prefer = '') {
+  return call<LyricPayload | null>('fetch_lyric', { title, artist, duration, prefer })
+}
+
+/** 一条歌词候选，设置页「歌词源」板块用 */
+export interface LyricCandidate {
+  source: string
+  source_id: string
+  title: string
+  artist: string
+  duration: number
+  synced: boolean
+  score: number
+  /** 这条是不是最后真正用上的那条 */
+  chosen: boolean
+}
+
+export interface CandidateBoard {
+  /** 这份清单对应哪首（title\u0001artist），前端自己比对 */
+  track: string
+  prefer: string
+  items: LyricCandidate[]
+}
+
+/** 最近一次取词的候选清单。切歌后 Rust 那边会换掉，前端轮询即可。 */
+export function lastCandidates() {
+  return call<CandidateBoard | null>('last_candidates')
+}
+
+export interface CacheClearResult {
+  files: number
+  bytes: number
+  dir: string
+}
+
+/** 清掉本地歌词缓存，下次播放重新联网匹配 */
+export function clearLyricCache() {
+  return call<CacheClearResult>('clear_lyric_cache')
 }
 
 export interface NowPlayingInfo {

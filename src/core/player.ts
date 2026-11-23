@@ -28,6 +28,8 @@ interface NowPlaying {
 let raw: { lrc: string; trans: string; yrc: string } | null = null
 let loadToken = 0
 let currentKey = ''
+/** 上一次取词用的词源（空串 = 自动）。用户手动切源时靠它触发重取 */
+let loadedPrefer = ''
 
 function buildDoc(): LyricDoc | null {
   if (!raw) return null
@@ -69,8 +71,11 @@ export function reapplyOffset(): void {
 
 async function loadLyric(np: NowPlaying): Promise<void> {
   const key = `${np.title}\u0001${np.artist}`
-  if (key === currentKey) return
+  const prefer = settings.lyric.source
+  // 手动切换词源时，同一首歌也要重新取一次
+  if (key === currentKey && prefer === loadedPrefer) return
   currentKey = key
+  loadedPrefer = prefer
   // 换歌后必须丢掉上一首的进度基准，否则新歌起始进度恰好和旧值一样时
   // 会被当成"没变化"，时钟就留在上一首的位置
   lastRawMs = Number.NaN
@@ -90,21 +95,26 @@ async function loadLyric(np: NowPlaying): Promise<void> {
   void loadCover(token)
 
   try {
-    const payload = await fetchLyric(np.title, np.artist, np.duration)
+    const payload = await fetchLyric(np.title, np.artist, np.duration, prefer)
     if (token !== loadToken) return
 
     if (!payload) {
       raw = null
       runtime.doc = null
       runtime.source = ''
-      runtime.notice = `没有找到《${np.title}》的歌词`
-      void logLine('WARN', `歌词为空：${np.title} - ${np.artist}`)
+      runtime.sourceId = ''
+      // 手动指定了词源时把话说清楚：不是"没有歌词"，是这个源没有
+      runtime.notice = prefer
+        ? '当前词源无可用歌词'
+        : `没有找到《${np.title}》的歌词`
+      void logLine('WARN', `歌词为空：${np.title} - ${np.artist}（词源：${prefer || '自动'}）`)
       return
     }
 
     raw = { lrc: payload.lrc, trans: payload.trans, yrc: payload.yrc }
     runtime.doc = buildDoc()
     runtime.source = payload.source
+    runtime.sourceId = payload.source_id || ''
     runtime.notice = runtime.doc ? '' : '歌词内容为空'
     void logLine(
       'INFO',
@@ -239,12 +249,19 @@ export async function initPlayer(): Promise<() => void> {
     },
     onTick: (p) => {
       applyTick(p as NowPlaying)
-      // 兜底：如果因为事件丢失没换歌，这里补一次
+      // 兜底：如果因为事件丢失没换歌，这里补一次。
+      // 词源被手动切换时，同一首歌也要重新取一次。
       const np = p as NowPlaying
-      if (`${np.title}\u0001${np.artist}` !== currentKey) void loadLyric(np)
+      if (
+        `${np.title}\u0001${np.artist}` !== currentKey ||
+        settings.lyric.source !== loadedPrefer
+      ) {
+        void loadLyric(np)
+      }
     },
     onStopped: () => {
       currentKey = ''
+      loadedPrefer = ''
       raw = null
       lastRawMs = Number.NaN
       rawChangedAt = 0
@@ -260,6 +277,7 @@ export async function initPlayer(): Promise<() => void> {
       runtime.trackApp = ''
       runtime.trackCover = ''
       runtime.source = ''
+      runtime.sourceId = ''
       runtime.notice = '暂无播放中的媒体'
     },
   })
