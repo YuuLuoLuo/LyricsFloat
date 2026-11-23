@@ -445,6 +445,25 @@ async function doExportLog(): Promise<void> {
   say(path ? `已导出：${path}` : '导出失败，请重试')
 }
 
+/** 清掉本地歌词缓存：匹配错过的歌、想换源重试时用 */
+async function doClearCache(): Promise<void> {
+  if (!isTauri) {
+    say('浏览器预览里没有缓存')
+    return
+  }
+  const r = await clearLyricCache()
+  if (!r) {
+    say('清除失败，请重试')
+    return
+  }
+  if (!r.files) {
+    say('缓存已经是空的')
+    return
+  }
+  const mb = (r.bytes / 1048576).toFixed(1)
+  say(`已清除 ${r.files} 个歌词缓存（${mb} MB）`)
+}
+
 function toggleLocked(v: boolean) {
   settings.behavior.locked = v
   saveSettings()
@@ -813,6 +832,12 @@ onBeforeUnmount(() => {
               <button class="ghost" @click="hintImport">导入…</button>
               <button class="ghost" @click="resetSettings">恢复默认</button>
               <button class="danger" @click="quit">退出 LyricsFloat</button>
+            </div>
+
+            <h3>歌词缓存</h3>
+            <p class="hint">搜到的歌词存在本机，同一首歌下次不再联网。清掉后重新匹配。</p>
+            <div class="danger-zone">
+              <button class="ghost" @click="doClearCache">清除歌词缓存</button>
             </div>
 
             <h3>日志</h3>
