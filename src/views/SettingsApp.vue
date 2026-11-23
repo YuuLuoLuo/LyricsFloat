@@ -559,10 +559,71 @@ interface UpdateState {
   text: string
   url?: string
   notes?: string
+  /** Release 对应的版本号，用来判断这份日志是不是"当前这版"的 */
+  version?: string
 }
 
 const updateState = ref<UpdateState>({ kind: 'idle', text: '' })
 const checking = ref(false)
+
+/**
+ * 极简 Markdown 渲染 —— 只覆盖更新日志里会出现的几种：
+ * 标题、无序列表、粗体、行内代码、分隔线。
+ *
+ * 不为它引第三方库：正文就十几行，为这点东西加一个几十 KB 的依赖不划算。
+ * 先整体转义 HTML 再替换标记，Release 正文里夹带的标签不会被当成 DOM 执行。
+ */
+function renderNotes(md: string): string {
+  const esc = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const inline = (s: string) =>
+    esc(s)
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+
+  const html: string[] = []
+  let list: string[] = []
+  const flush = () => {
+    if (!list.length) return
+    html.push(`<ul>${list.map((x) => `<li>${x}</li>`).join('')}</ul>`)
+    list = []
+  }
+
+  for (const raw of md.split(/\r?\n/)) {
+    const t = raw.trim()
+    // 空行和 --- 分隔线都不占版面
+    if (!t || /^([-*_])\1{2,}$/.test(t)) {
+      flush()
+      continue
+    }
+    const head = /^(#{1,6})\s+(.*)$/.exec(t)
+    if (head) {
+      flush()
+      html.push(`<h4>${inline(head[2])}</h4>`)
+      continue
+    }
+    const item = /^[-*+]\s+(.*)$/.exec(t)
+    if (item) {
+      list.push(inline(item[1]))
+      continue
+    }
+    flush()
+    html.push(`<p>${inline(t)}</p>`)
+  }
+  flush()
+  return html.join('')
+}
+
+const notesHtml = computed(() => renderNotes(updateState.value.notes || ''))
+
+/** 日志标题：分清楚这份是"你要升到的新版"还是"你现在这版"的 */
+const notesTitle = computed(() => {
+  const s = updateState.value
+  if (!s.notes) return ''
+  if (s.kind === 'new') return `更新内容（${s.version}）`
+  if (s.version && version.value && s.version === version.value) return '本次更新内容'
+  return `发布版 ${s.version} 的更新内容`
+})
 
 async function doCheckUpdate(): Promise<void> {
   if (!ABOUT.repo) {
@@ -580,14 +641,17 @@ async function doCheckUpdate(): Promise<void> {
     updateState.value = { kind: 'error', text: error || '没有读到版本信息' }
     return
   }
-  updateState.value = info.newer
-    ? {
-        kind: 'new',
-        text: `发现新版本 ${info.latest}${info.published ? ` · ${info.published}` : ''}`,
-        url: info.url,
-        notes: info.notes,
-      }
-    : { kind: 'latest', text: `已是最新版本（${info.latest}）` }
+  // 已是最新时也把日志带出来：用户点"检查更新"就是想看这次改了什么，
+  // 只回一句"已是最新"等于什么都没说。
+  updateState.value = {
+    kind: info.newer ? 'new' : 'latest',
+    text: info.newer
+      ? `发现新版本 ${info.latest}${info.published ? ` · ${info.published}` : ''}`
+      : `已是最新版本（${info.latest}）`,
+    url: info.newer ? info.url : undefined,
+    notes: info.notes,
+    version: info.latest,
+  }
 }
 
 async function openLink(url: string): Promise<void> {
@@ -1371,7 +1435,14 @@ onBeforeUnmount(() => {
             <div v-if="updateState.url" class="update-actions">
               <button class="primary" @click="openLink(updateState.url)">前往下载</button>
             </div>
-            <pre v-if="updateState.notes" class="notes">{{ updateState.notes }}</pre>
+            <div v-if="notesHtml" class="notesblock">
+              <div class="noteshead">{{ notesTitle }}</div>
+              <!-- eslint-disable-next-line vue/no-v-html -- renderNotes 已先转义 HTML -->
+              <div class="notes" v-html="notesHtml"></div>
+            </div>
+            <p v-else-if="updateState.kind === 'latest' || updateState.kind === 'new'" class="hint">
+              这个版本没有填写更新说明。
+            </p>
             <p v-if="!repoUrl" class="hint">仓库还没发布，暂时无法检查更新。</p>
 
             <h3>项目</h3>
@@ -1852,20 +1923,66 @@ section > h3:first-child {
 }
 
 /* Release 说明是纯文本（还带换行），别按 HTML 渲染 */
+.notesblock {
+  margin-top: 10px;
+}
+
+.noteshead {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.42);
+  margin-bottom: 5px;
+}
+
 .notes {
-  margin: 10px 0 0;
+  margin: 0;
   padding: 10px 12px;
   max-height: 148px;
   overflow-y: auto;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-  font-family: inherit;
   font-size: 11.5px;
   line-height: 1.65;
-  color: rgba(255, 255, 255, 0.6);
-  white-space: pre-wrap;
+  color: rgba(255, 255, 255, 0.64);
   word-break: break-word;
+}
+
+.notes :deep(h4) {
+  margin: 8px 0 3px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.notes :deep(h4:first-child) {
+  margin-top: 0;
+}
+
+.notes :deep(p) {
+  margin: 3px 0;
+}
+
+.notes :deep(ul) {
+  margin: 3px 0;
+  padding-left: 16px;
+  list-style: disc;
+}
+
+.notes :deep(li) {
+  margin: 1px 0;
+}
+
+.notes :deep(strong) {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.notes :deep(code) {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
 }
 
 .val {
