@@ -1037,4 +1037,40 @@ mod tests {
         assert_ne!(a, b, "不同词源共用了同一个缓存键");
         assert_eq!(a.len(), 16);
     }
+
+    /// 用户报的现场：QQ 音乐报 60 秒试听片段，结果选中了「沈幼楚」那版营销号歌词。
+    /// 修完之后同一个输入不能再落到那条上。
+    #[test]
+    fn short_duration_avoids_keyword_bait() {
+        let (cands, _handles) = collect("搁浅", "周杰伦", 60.0, "");
+        assert!(!cands.is_empty(), "一条候选都没有");
+
+        let mut order: Vec<usize> = (0..cands.len()).collect();
+        order.sort_by(|a, b| {
+            cands[*b]
+                .score
+                .partial_cmp(&cands[*a].score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for &i in order.iter().take(5) {
+            println!(
+                "{:>4} 分 | {} | {} / {} / {}s",
+                cands[i].score as i64,
+                cands[i].source,
+                cands[i].title,
+                cands[i].artist,
+                cands[i].duration.round() as i64
+            );
+        }
+        let chosen = order
+            .iter()
+            .find(|i| cands[**i].score >= MIN_SCORE)
+            .copied()
+            .expect("没有任何候选过阈值");
+        assert_ne!(
+            cands[chosen].artist, "沈幼楚",
+            "又选中了蹭名条目：{}",
+            cands[chosen].title
+        );
+    }
 }
