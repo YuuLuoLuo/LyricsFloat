@@ -100,9 +100,22 @@ fn app_name(aumid: &str) -> String {
     };
     let name = name.trim_end_matches(".exe").trim();
     if name.is_empty() {
-        aumid.to_string()
-    } else {
-        name.to_string()
+        return aumid.to_string();
+    }
+    // AUMID 里带的是包名片段，有些认不出是哪个软件。
+    // 最典型的是系统自带的「媒体播放器」：解析出来是 ZuneMusic（它还叫 Zune 时代的名字），
+    // 用户看到这个词完全对不上自己打开的那个窗口。
+    pretty_app(name)
+}
+
+/// 把包名片段换成用户认得的名字。没收录的原样返回。
+fn pretty_app(name: &str) -> String {
+    match name.to_ascii_lowercase().as_str() {
+        // Windows 11 自带的「媒体播放器」（Microsoft.ZuneMusic）
+        "zunemusic" => "媒体播放器".into(),
+        // 老版「Groove 音乐」，同一个包
+        "zunemusicpreview" => "媒体播放器".into(),
+        _ => name.to_string(),
     }
 }
 
@@ -637,8 +650,13 @@ mod tests {
         );
         assert_eq!(
             app_name("Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"),
-            "ZuneMusic"
+            "媒体播放器"
         );
+    }
+
+    #[test]
+    fn names_unknown_apps_as_is() {
+        assert_eq!(app_name("SomeVendor.WeirdApp_x!WeirdApp"), "WeirdApp");
     }
 
     #[test]

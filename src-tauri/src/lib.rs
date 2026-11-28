@@ -37,6 +37,8 @@ pub fn run() {
             window::peek_board,
             window::reset_board_position,
             window::set_board_parked,
+            window::set_glass_always,
+            window::set_glass_color,
             about::app_version,
             about::open_url,
             about::check_update,

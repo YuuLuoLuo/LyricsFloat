@@ -45,6 +45,10 @@ export interface AppSettings {
   glass: {
     tint: string
     alpha: number
+    /** 背景常显：锁定或鼠标离开词板时也显示背景（默认关） */
+    always: boolean
+    /** 从封面自动取色；开启后 tint 不生效，没有封面时用中灰 */
+    autoColor: boolean
   }
   behavior: {
     autostart: boolean
@@ -104,7 +108,7 @@ export const DEFAULTS: AppSettings = {
     colorHighlight: '#7fd4ff',
   },
   view: { rotate: false, translation: false, karaoke: false },
-  glass: { tint: '#14141a', alpha: 0.42 },
+  glass: { tint: '#14141a', alpha: 0.42, always: false, autoColor: false },
   behavior: { autostart: false, alwaysOnTop: true, locked: false, hideWhenIdle: false },
   info: { show: false, pos: 'top', cover: 'left', text: 'left' },
   lyric: { offsetMs: 0, player: '', pinPlayer: false, source: '' },
@@ -315,6 +319,8 @@ export interface Runtime {
   trackApp: string
   /** 当前曲目封面（data URL），取不到时为空串 */
   trackCover: string
+  /** 从封面取到的主色（#rrggbb）；没有封面时为空串，界面用中灰兜底 */
+  coverColor: string
   source: string
   /** 当前歌词来自哪个曲库（netease / lrclib / lrccx） */
   sourceId: string
@@ -339,6 +345,7 @@ export const runtime = reactive<Runtime>({
   trackAlbum: '',
   trackApp: '',
   trackCover: '',
+  coverColor: '',
   source: '',
   sourceId: '',
   notice: '',

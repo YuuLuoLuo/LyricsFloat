@@ -394,6 +394,16 @@ export async function setBoardParked(parked: boolean): Promise<void> {
   await call('set_board_parked', { parked })
 }
 
+/** 背景常显：锁定或鼠标离开时也保留玻璃背景（不可交互） */
+export async function setGlassAlways(on: boolean): Promise<void> {
+  await call('set_glass_always', { on })
+}
+
+/** 只换玻璃颜色（换歌取色时用，不碰窗口尺寸，避免重排闪烁） */
+export async function setGlassColor(tint: string, alpha: number): Promise<void> {
+  await call('set_glass_color', { tint, alpha })
+}
+
 const POS_KEY = 'lyricsfloat.pos'
 /** 改名前的键，读到就当新键用并迁过去 */
 const POS_KEY_OLD = 'lyricboard.pos'

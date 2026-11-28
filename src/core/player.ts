@@ -72,8 +72,17 @@ export function reapplyOffset(): void {
 async function loadLyric(np: NowPlaying): Promise<void> {
   const key = `${np.title}\u0001${np.artist}`
   const prefer = settings.lyric.source
+  const sameTrack = key === currentKey
   // 手动切换词源时，同一首歌也要重新取一次
-  if (key === currentKey && prefer === loadedPrefer) return
+  if (sameTrack && prefer === loadedPrefer) return
+  /**
+   * 只是换了词源：不重置封面、不置 loading。
+   *
+   * 换歌时那套"清空 + loading"是为了别让上一首的封面/歌词残留；
+   * 但同一首歌换源时，旧歌词和封面都还是这首的，清掉反而让词板先空一下
+   * 再填回来 —— 用户看到的就是"切个词源屏幕闪了一下"。
+   */
+  const soft = sameTrack
   currentKey = key
   loadedPrefer = prefer
   // 换歌后必须丢掉上一首的进度基准，否则新歌起始进度恰好和旧值一样时
@@ -89,10 +98,13 @@ async function loadLyric(np: NowPlaying): Promise<void> {
   runtime.trackArtist = np.artist
   runtime.trackAlbum = np.album
   runtime.trackApp = np.app ?? ''
-  runtime.trackCover = ''
-  runtime.notice = ''
-  runtime.loading = true
-  void loadCover(token)
+  if (!soft) {
+    runtime.trackCover = ''
+    runtime.coverColor = ''
+    runtime.notice = ''
+    runtime.loading = true
+    void loadCover(token)
+  }
 
   try {
     const payload = await fetchLyric(np.title, np.artist, np.duration, prefer)
@@ -126,6 +138,67 @@ async function loadLyric(np: NowPlaying): Promise<void> {
 }
 
 /**
+ * 封面取不到时用的背景色（中灰）
+ */
+const NO_COVER_COLOR = '#808080'
+
+/**
+ * 从封面取一个适合做背景的主色。
+ *
+ * 缩到 24×24 再逐像素统计。跳过太暗、太亮和几乎无彩色的像素 ——
+ * 封面常有黑边和白底，直接取平均会得到一片深灰/浅灰，看着像"取色没生效"。
+ * 剩下的按饱和度加权平均；一个合格像素都没有（纯黑白封面）就退到中灰。
+ */
+function dominantColor(src: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const n = 24
+        const canvas = document.createElement('canvas')
+        canvas.width = n
+        canvas.height = n
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return resolve(NO_COVER_COLOR)
+        ctx.drawImage(img, 0, 0, n, n)
+        const { data } = ctx.getImageData(0, 0, n, n)
+
+        let r = 0
+        let g = 0
+        let b = 0
+        let w = 0
+        for (let i = 0; i < data.length; i += 4) {
+          const R = data[i]
+          const G = data[i + 1]
+          const B = data[i + 2]
+          const max = Math.max(R, G, B)
+          const min = Math.min(R, G, B)
+          const sat = max === 0 ? 0 : (max - min) / max
+          const lum = (R * 299 + G * 587 + B * 114) / 1000
+          if (lum < 24 || lum > 236 || sat < 0.12) continue
+          // 饱和度高的权重更大；太亮太暗的再压一压
+          const weight = sat * (1 - Math.abs(lum - 128) / 160)
+          r += R * weight
+          g += G * weight
+          b += B * weight
+          w += weight
+        }
+        if (w < 0.001) return resolve(NO_COVER_COLOR)
+        const hex = (v: number) =>
+          Math.max(0, Math.min(255, Math.round(v / w)))
+            .toString(16)
+            .padStart(2, '0')
+        resolve(`#${hex(r)}${hex(g)}${hex(b)}`)
+      } catch {
+        resolve(NO_COVER_COLOR)
+      }
+    }
+    img.onerror = () => resolve(NO_COVER_COLOR)
+    img.src = src
+  })
+}
+
+/**
  * 封面是 Rust 换歌时才去读一次流的，前端问到的时机可能比缓存早一点，
  * 所以取不到就隔一小会儿重试几次，别一直空着。
  */
@@ -135,6 +208,10 @@ async function loadCover(token: number): Promise<void> {
     if (token !== loadToken) return
     if (url) {
       runtime.trackCover = url
+      // 主色总是算一份：用户随时可能打开「从封面取色」，
+      // 那时不该再等一次换歌。24×24 的采样，开销可以忽略。
+      const color = await dominantColor(url)
+      if (token === loadToken) runtime.coverColor = color
       return
     }
     await new Promise((r) => setTimeout(r, 700))
@@ -276,6 +353,7 @@ export async function initPlayer(): Promise<() => void> {
       runtime.trackArtist = ''
       runtime.trackApp = ''
       runtime.trackCover = ''
+      runtime.coverColor = ''
       runtime.source = ''
       runtime.sourceId = ''
       runtime.notice = '暂无播放中的媒体'

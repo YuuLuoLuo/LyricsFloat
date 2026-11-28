@@ -32,6 +32,7 @@ import {
   resetBoardPosition,
   setAlwaysOnTop,
   setAutostart,
+  setGlassAlways,
   setLocked,
   setPlayerPin,
   setPlayerPref,
@@ -230,9 +231,9 @@ const lyricSource = computed(() => {
 
 /** 三个曲库。id 与 Rust 侧一致；空串（自动）在模板里单独一个按钮 */
 const SOURCES = [
-  { id: 'netease', name: '网易云', note: '中文曲库大，无版权时只剩翻唱' },
-  { id: 'lrclib', name: 'LRCLIB', note: '开放曲库，欧美与经典曲目最全' },
-  { id: 'lrccx', name: 'lrc.cx', note: '酷狗镜像，中文冷门歌兜底' },
+  { id: 'netease', name: '网易云' },
+  { id: 'lrclib', name: 'LRCLIB' },
+  { id: 'lrccx', name: 'lrc.cx' },
 ]
 
 const board = ref<CandidateBoard | null>(null)
@@ -437,6 +438,18 @@ const parkMode = computed(() => settings.behavior.hideWhenIdle && !runtime.doc)
 function toggleHideWhenIdle(v: boolean) {
   settings.behavior.hideWhenIdle = v
   saveSettings()
+}
+
+/** 背景色预览：从封面取色时显示实际会用的那个颜色（没有封面是中灰） */
+const autoTint = computed(() =>
+  settings.glass.autoColor ? runtime.coverColor || '#808080' : settings.glass.tint,
+)
+
+/** 背景常显要同时告诉 Rust —— 窗口的可见性由它控制，光改 CSS 画不出来 */
+function toggleGlassAlways(v: boolean): void {
+  settings.glass.always = v
+  saveSettings()
+  void setGlassAlways(v)
 }
 
 async function doExportLog(): Promise<void> {
@@ -729,6 +742,7 @@ onMounted(async () => {
   // 播放来源偏好推给 Rust（词板窗口也会推，两边都推才不会互相覆盖）
   await setPlayerPref(settings.lyric.player)
   await setPlayerPin(settings.lyric.pinPlayer)
+  await setGlassAlways(settings.glass.always)
   await refreshPlayers()
 
   // 设置文件 + 系统字体列表
@@ -991,7 +1005,6 @@ onBeforeUnmount(() => {
                 :key="s.id"
                 class="chip"
                 :class="{ on: settings.lyric.source === s.id }"
-                :title="s.note"
                 @click="pickSource(s.id)"
               >
                 {{ s.name }}
@@ -1394,11 +1407,38 @@ onBeforeUnmount(() => {
               />
               <span class="val">{{ settings.glass.alpha.toFixed(2) }}</span>
             </div>
+            <div class="swrow single">
+              <label class="switch">
+                <span>背景常显</span>
+                <input
+                  type="checkbox"
+                  :checked="settings.glass.always"
+                  @change="toggleGlassAlways(($event.target as HTMLInputElement).checked)"
+                />
+                <i></i>
+              </label>
+            </div>
+            <div class="swrow single">
+              <label class="switch">
+                <span>从封面取色</span>
+                <input
+                  type="checkbox"
+                  :checked="settings.glass.autoColor"
+                  @change="settings.glass.autoColor = ($event.target as HTMLInputElement).checked"
+                />
+                <i></i>
+              </label>
+            </div>
             <div class="row">
-              <span class="lbl">色调</span>
-              <button type="button" class="color" @click="pickColor('tint')">
-                <span :style="{ background: settings.glass.tint }"></span>
-                <em>{{ settings.glass.tint }}</em>
+              <span class="lbl">背景颜色</span>
+              <button
+                type="button"
+                class="color"
+                :disabled="settings.glass.autoColor"
+                @click="pickColor('tint')"
+              >
+                <span :style="{ background: autoTint }"></span>
+                <em>{{ autoTint }}</em>
               </button>
               <span class="val"></span>
             </div>
@@ -2086,6 +2126,13 @@ section > h3:first-child {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.4);
   font-variant-numeric: tabular-nums;
+}
+
+/* 「从封面取色」开着时颜色由封面色决定，调色板没有意义 */
+.color:disabled {
+  opacity: 0.45;
+  cursor: default;
+  pointer-events: none;
 }
 
 .switch {

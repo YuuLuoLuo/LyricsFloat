@@ -17,6 +17,9 @@ pub(crate) static PARKED: AtomicBool = AtomicBool::new(false);
 /// 临时显形的截止时刻（epoch ms）。设置页拖宽高时反复刷新，
 /// 悬停轮询看到还没过期就不收起 —— 调尺寸时能看清面板的边界。
 pub(crate) static PEEK_UNTIL: AtomicU64 = AtomicU64::new(0);
+/// 背景常显：锁定或鼠标离开时仍保留玻璃背景（只是点不到）。
+/// 关着的时候静止态是"完全透明 + 穿透"，开着就变成"看得见但穿透"。
+pub(crate) static GLASS_ALWAYS: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn now_ms() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -145,9 +148,32 @@ fn reveal_on(win: &WebviewWindow) {
 
 fn reveal_off(win: &WebviewWindow) {
     crate::logbuf::info("悬停收起");
-    effects::disable_glass(win);
-    effects::set_click_through(win, true);
+    if GLASS_ALWAYS.load(Ordering::Relaxed) {
+        // 背景常显：留着玻璃，只是让它点不到。
+        // 关掉亚克力会让 CSS 背景失去系统模糊底衬，看起来像一块死色块。
+        effects::enable_glass(win, GLASS_COLOR.load(Ordering::Relaxed));
+        effects::set_passthrough(win, true, true);
+    } else {
+        effects::disable_glass(win);
+        effects::set_click_through(win, true);
+    }
     effects::strip_caption(win);
+}
+
+/// 背景常显开关。关掉时要立刻把窗口收回去，否则会留一块看不见的"幽灵"背景。
+#[tauri::command]
+pub fn set_glass_always(app: AppHandle, on: bool) {
+    GLASS_ALWAYS.store(on, Ordering::Relaxed);
+    crate::logbuf::info(if on { "背景常显：开" } else { "背景常显：关" });
+    let Some(win) = board(&app) else { return };
+    if PARKED.load(Ordering::Relaxed) {
+        return;
+    }
+    if REVEALED.load(Ordering::Relaxed) {
+        // 显形中：什么都不用改，悬停轮询会按新状态维持
+        return;
+    }
+    reveal_off(&win);
 }
 
 /// 托盘 / 快捷键共用：切换锁定
@@ -188,6 +214,19 @@ pub fn toggle_lock_cmd(app: AppHandle) -> bool {
     let next = !is_locked();
     set_lock_state(&app, next);
     next
+}
+
+/// 只换玻璃颜色，不碰尺寸。
+///
+/// 「从封面取色」每换一首歌都要改颜色，走 `apply_board` 会连带 `resize_exact` ——
+/// tao 的尺寸调用会把整份窗口样式重写一遍，换歌时闪一下就是那么来的。
+#[tauri::command]
+pub fn set_glass_color(app: AppHandle, tint: String, alpha: f64) {
+    store_glass(&tint, alpha);
+    let Some(win) = board(&app) else { return };
+    if REVEALED.load(Ordering::Relaxed) || GLASS_ALWAYS.load(Ordering::Relaxed) {
+        effects::enable_glass(&win, GLASS_COLOR.load(Ordering::Relaxed));
+    }
 }
 
 /// 尺寸 + 玻璃色，一次性下发。设置页拖滑块时高频调用。

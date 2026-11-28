@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
-use super::{effects, now_ms, GLASS_COLOR, LOCKED, PARKED, PEEK_UNTIL, REVEALED};
+use super::{effects, now_ms, GLASS_ALWAYS, GLASS_COLOR, LOCKED, PARKED, PEEK_UNTIL, REVEALED};
 
 /// 16ms ≈ 60Hz。鼠标穿透时 WebView 收不到 mousemove，只能读全局光标。
 const TICK_MS: u64 = 16;
@@ -21,6 +21,8 @@ pub fn spawn(app: AppHandle, win: WebviewWindow) {
     thread::spawn(move || {
         let mut leave_ticks: u64 = 0;
         let mut parked_checks: u64 = 0;
+        // 锁定态下「背景常显」已经应用过没有 —— 只在状态变化时动窗口样式
+        let mut locked_always_done = false;
 
         loop {
             thread::sleep(Duration::from_millis(TICK_MS));
@@ -50,25 +52,43 @@ pub fn spawn(app: AppHandle, win: WebviewWindow) {
             // set_always_on_top / show 之后都会整份重写一次），就地摘掉。
             // 样式没变时这里只做两次 GetWindowLongW，开销可以忽略。
             effects::strip_caption(&win);
+
+            let always = GLASS_ALWAYS.load(Ordering::Relaxed);
+            let current = REVEALED.load(Ordering::Relaxed);
             // 同理，tao 的整份重写也会把 WS_EX_TRANSPARENT | WS_EX_LAYERED 抹掉。
             // 那两位是"静止态隐形 + 穿透点击"的全部实现 —— 启动即锁定时正好
             // 撞上前端 show()，词板就显了形还挡点击；而 REVEALED 从头到尾都是
             // false，等不到一次状态切换去补救。所以这里每拍对齐一次：
             // 与目标状态一致时是两次 GetWindowLongW，不一致才写。
-            effects::set_click_through(&win, !REVEALED.load(Ordering::Relaxed));
+            // 「背景常显」开着时穿透但保留可见（alpha 255），否则维持老样子（隐形）。
+            effects::set_passthrough(&win, !current, current || always);
 
             let locked = LOCKED.load(Ordering::Relaxed);
-            let current = REVEALED.load(Ordering::Relaxed);
 
             if locked {
                 leave_ticks = 0;
-                if current {
-                    REVEALED.store(false, Ordering::Relaxed);
-                    reveal(&win, false);
-                    let _ = app.emit("hover-changed", false);
+                if always {
+                    // 锁定 + 背景常显：窗口要看得见（背景在），但点不到、也没有悬停交互
+                    if !locked_always_done {
+                        locked_always_done = true;
+                        effects::enable_glass(&win, GLASS_COLOR.load(Ordering::Relaxed));
+                        effects::strip_caption(&win);
+                    }
+                    if current {
+                        REVEALED.store(false, Ordering::Relaxed);
+                        let _ = app.emit("hover-changed", false);
+                    }
+                } else {
+                    locked_always_done = false;
+                    if current {
+                        REVEALED.store(false, Ordering::Relaxed);
+                        reveal(&win, false);
+                        let _ = app.emit("hover-changed", false);
+                    }
                 }
                 continue;
             }
+            locked_always_done = false;
 
             // 设置页刚调过宽高，或者正在调：这段时间内保持显形，
             // 让用户能看清面板的实际边界。过期后照常走悬停判断。
@@ -108,6 +128,10 @@ fn reveal(win: &WebviewWindow, on: bool) {
     if on {
         effects::enable_glass(win, GLASS_COLOR.load(Ordering::Relaxed));
         effects::set_click_through(win, false);
+    } else if GLASS_ALWAYS.load(Ordering::Relaxed) {
+        // 背景常显：留玻璃 + 可见，但点不到
+        effects::enable_glass(win, GLASS_COLOR.load(Ordering::Relaxed));
+        effects::set_passthrough(win, true, true);
     } else {
         effects::disable_glass(win);
         effects::set_click_through(win, true);

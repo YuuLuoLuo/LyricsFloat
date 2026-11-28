@@ -10,15 +10,34 @@ import {
   savePosition,
   onMoved,
   setLocked,
+  setGlassColor,
   startDragging,
 } from '../core/bridge'
 
 const revealed = computed(() => glassVisible())
 
-const glassStyle = computed(() => {
-  const { tint, alpha } = settings.glass
-  return { background: `rgba(${hexToRgb(tint)}, ${alpha})` }
+/** 背景色：「从封面取色」开着就用封面主色，没有封面时用中灰 */
+const glassTint = computed(() => {
+  if (!settings.glass.autoColor) return settings.glass.tint
+  return runtime.coverColor || '#808080'
 })
+
+const glassStyle = computed(() => {
+  const { alpha } = settings.glass
+  return { background: `rgba(${hexToRgb(glassTint.value)}, ${alpha})` }
+})
+
+/**
+ * 背景色变了就通知 Rust 换亚克力底色。
+ * 走 `set_glass_color` 而不是 `apply_board`：后者会顺带 resize，
+ * 换歌时（取色变了）会闪一下。
+ */
+watch(
+  () => [glassTint.value, settings.glass.alpha] as const,
+  ([tint, alpha]) => {
+    if (isTauri) void setGlassColor(tint, alpha)
+  },
+)
 
 function hexToRgb(hex: string): string {
   const h = hex.replace('#', '')
@@ -162,7 +181,7 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
 <template>
   <div
     class="board"
-    :class="{ revealed, locked: runtime.locked }"
+    :class="{ revealed, locked: runtime.locked, 'glass-always': settings.glass.always }"
     @pointerdown="onPointerDown"
     @contextmenu="onContextMenu"
   >
@@ -261,6 +280,11 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
 }
 
 .board.revealed .glass {
+  opacity: 1;
+}
+
+/* 背景常显：锁定或鼠标不在时也把背景留着（此时窗口是"看得见但点不到"） */
+.board.glass-always .glass {
   opacity: 1;
 }
 
