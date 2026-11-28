@@ -162,11 +162,22 @@ const previewGlass = computed(() => {
 
 const showTrans = computed(() => settings.view.translation && previewHasTrans.value)
 
-/** 词板高度能放几行 —— 行数不再让用户手选，由高度和行距决定 */
+/**
+ * 词板高度能放几行。
+ *
+ * 和舞台里的算法对齐（`unitH` / `capacity`）：行高取「用户行距」与
+ * 「字号 × 1.25」的较大者，翻译开着放大 1.5 倍，旋转样式再压紧一档。
+ * 信息栏 46px、进度条 10px 要扣掉 —— 不扣的话估出来的行数总比实际多一行。
+ */
 const capacity = computed(() => {
+  const a = settings.appearance
   const head = settings.info.show ? 46 : 0
-  const unit = Math.max(1, settings.appearance.lineHeight) * (showTrans.value ? 1.5 : 1)
-  const usable = Math.max(0, settings.window.height - head)
+  const bar = settings.media.show && settings.media.parts.bar ? 10 : 0
+  const lh = Math.max(1, a.lineHeight, a.fontSize * 1.25)
+  const trans = showTrans.value ? 1.5 : 1
+  const tight = settings.view.rotate ? (showTrans.value ? 0.86 : 0.78) : 1
+  const unit = lh * trans * tight
+  const usable = Math.max(0, settings.window.height - head - bar)
   return Math.max(1, Math.floor(usable / unit))
 })
 
@@ -260,10 +271,30 @@ const candList = computed(() => {
  * 每拍都会比对 `settings.lyric.source`，发现变了就自己重取这首。
  */
 function pickSource(id: string): void {
+  if (settings.lyric.source === id) return
   settings.lyric.source = id
   // 换了库，之前从那一个库里挑的那条已经不适用了
   settings.lyric.pick = ''
+  lockSearch()
   saveSettings()
+}
+
+/**
+ * 点下去就先把按钮锁住。
+ *
+ * 取词是播放循环下一拍（250ms 后）才发起的，这段空窗足够连点好几下；
+ * 而真正开始搜索后 player.ts 会接管这个标志（带 15 秒超时）。
+ * 这里再挂一个 4 秒的兜底：万一那次请求因为 guard 没发出去，
+ * 不能让按钮一直按不动。
+ */
+let pickLockTimer: number | null = null
+function lockSearch(): void {
+  runtime.searching = true
+  if (pickLockTimer) clearTimeout(pickLockTimer)
+  pickLockTimer = window.setTimeout(() => {
+    pickLockTimer = null
+    if (!runtime.loading) runtime.searching = false
+  }, 4000)
 }
 
 /** 候选的稳定标识，与 Rust 侧 candidate_id 一致 */
@@ -275,6 +306,7 @@ function candidateId(c: LyricCandidate): string {
 function pickCandidate(c: LyricCandidate): void {
   const id = candidateId(c)
   settings.lyric.pick = settings.lyric.pick === id ? '' : id
+  lockSearch()
   saveSettings()
 }
 
@@ -362,6 +394,7 @@ type ColorKey =
   | 'colorHighlight'
   | 'strokeColor'
   | 'shadowColor'
+  | 'infoColor'
   | 'tint'
 let paletteKey: ColorKey = 'colorCurrent'
 
@@ -370,13 +403,18 @@ function pickColor(key: ColorKey): void {
   const el = palette.value
   if (!el) return
   el.value =
-    key === 'tint' ? settings.glass.tint : settings.appearance[key as Exclude<ColorKey, 'tint'>]
+    key === 'tint'
+      ? settings.glass.tint
+      : key === 'infoColor'
+        ? settings.info.color
+        : settings.appearance[key]
   el.click()
 }
 
 function onPaletteInput(e: Event): void {
   const v = (e.target as HTMLInputElement).value
   if (paletteKey === 'tint') settings.glass.tint = v
+  else if (paletteKey === 'infoColor') settings.info.color = v
   else settings.appearance[paletteKey] = v
 }
 
@@ -483,6 +521,27 @@ function setMediaMode(m: 'always' | 'hover'): void {
   // 悬停模式下锁定时控件不显形，留着"可点"只会多一块看不见的热区
   if (m === 'hover') settings.media.lockedClickable = false
   saveSettings()
+}
+
+/**
+ * 单独开关某个部件。四个全关等于控件没开，所以最后一个不许关。
+ */
+function togglePart(k: 'prev' | 'toggle' | 'next' | 'bar'): void {
+  const p = settings.media.parts
+  const on = Object.values(p).filter(Boolean).length
+  if (p[k] && on <= 1) {
+    say('至少要保留一个控件')
+    return
+  }
+  p[k] = !p[k]
+  saveSettings()
+}
+
+/** 暂停自动隐藏的延迟：手填，收敛到 1 秒 ~ 1 小时 */
+function onPauseDelayInput(e: Event): void {
+  const raw = Number((e.target as HTMLInputElement).value)
+  const v = Number.isFinite(raw) ? Math.min(3600, Math.max(1, Math.round(raw))) : 60
+  settings.behavior.pauseDelaySec = v
 }
 
 async function doExportLog(): Promise<void> {
@@ -915,6 +974,42 @@ onBeforeUnmount(() => {
             <p v-if="settings.behavior.hideWhenIdle" class="hint">
               没有播放、或没有歌词时词板整个关闭。
             </p>
+            <div class="swrow">
+              <label class="switch">
+                <span>暂停后自动隐藏</span>
+                <input
+                  type="checkbox"
+                  :checked="settings.behavior.hideOnPause"
+                  @change="settings.behavior.hideOnPause = ($event.target as HTMLInputElement).checked"
+                />
+                <i></i>
+              </label>
+              <label class="switch" :class="{ dis: !settings.behavior.hideOnPause }">
+                <span>连信息与控件一起隐藏</span>
+                <input
+                  type="checkbox"
+                  :checked="settings.behavior.hideMediaOnPause"
+                  :disabled="!settings.behavior.hideOnPause"
+                  @change="settings.behavior.hideMediaOnPause = ($event.target as HTMLInputElement).checked"
+                />
+                <i></i>
+              </label>
+            </div>
+            <div v-if="settings.behavior.hideOnPause" class="row">
+              <span class="lbl">隐藏延迟</span>
+              <input
+                class="num"
+                type="number"
+                min="1"
+                max="3600"
+                :value="settings.behavior.pauseDelaySec"
+                @change="onPauseDelayInput"
+              />
+              <span class="val">秒</span>
+            </div>
+            <p v-if="settings.behavior.hideOnPause" class="hint">
+              暂停超过这个时间就先把歌词收起来，鼠标移到词板上会重新显示。
+            </p>
             <div class="row">
               <span class="lbl">词板位置</span>
               <div class="grow"></div>
@@ -1029,8 +1124,13 @@ onBeforeUnmount(() => {
                 <span v-else class="muted">{{ runtime.notice || '无可用歌词' }}</span>
               </div>
             </div>
-            <div class="chips srcpick">
-              <button class="chip" :class="{ on: !settings.lyric.source }" @click="pickSource('')">
+            <div class="chips srcpick" :class="{ off: runtime.searching }">
+              <button
+                class="chip"
+                :class="{ on: !settings.lyric.source }"
+                :disabled="runtime.searching"
+                @click="pickSource('')"
+              >
                 自动
               </button>
               <button
@@ -1038,11 +1138,13 @@ onBeforeUnmount(() => {
                 :key="s.id"
                 class="chip"
                 :class="{ on: settings.lyric.source === s.id }"
+                :disabled="runtime.searching"
                 @click="pickSource(s.id)"
               >
                 {{ s.name }}
               </button>
             </div>
+            <p v-if="runtime.searching" class="hint">正在搜索，稍等一下…</p>
             <p
               v-if="settings.lyric.source && runtime.trackTitle && !runtime.loading && (!runtime.doc || runtime.notice)"
               class="hint"
@@ -1196,6 +1298,32 @@ onBeforeUnmount(() => {
                 </div>
                 <span class="val"></span>
               </div>
+              <div class="row">
+                <span class="lbl">文字颜色</span>
+                <button type="button" class="color" @click="pickColor('infoColor')">
+                  <span :style="{ background: settings.info.color }"></span>
+                  <em>{{ settings.info.color }}</em>
+                </button>
+                <span class="val"></span>
+              </div>
+              <div class="row">
+                <span class="lbl">无歌词时</span>
+                <div class="seg grow">
+                  <button
+                    :class="{ on: settings.info.emptyPos === 'top' }"
+                    @click="settings.info.emptyPos = 'top'"
+                  >
+                    顶部
+                  </button>
+                  <button
+                    :class="{ on: settings.info.emptyPos === 'bottom' }"
+                    @click="settings.info.emptyPos = 'bottom'"
+                  >
+                    底部
+                  </button>
+                </div>
+                <span class="val"></span>
+              </div>
               <p v-if="settings.media.show" class="hint">开启媒体控件后文本不能居中：控件要放在文本的另一侧。</p>
 
               <h3>媒体控件</h3>
@@ -1212,6 +1340,40 @@ onBeforeUnmount(() => {
               </div>
               <template v-if="settings.media.show">
                 <div class="row">
+                  <span class="lbl">显示部件</span>
+                  <div class="grow partchips">
+                    <button
+                      class="chipbtn"
+                      :class="{ on: settings.media.parts.prev }"
+                      @click="togglePart('prev')"
+                    >
+                      上一曲
+                    </button>
+                    <button
+                      class="chipbtn"
+                      :class="{ on: settings.media.parts.toggle }"
+                      @click="togglePart('toggle')"
+                    >
+                      播放
+                    </button>
+                    <button
+                      class="chipbtn"
+                      :class="{ on: settings.media.parts.next }"
+                      @click="togglePart('next')"
+                    >
+                      下一曲
+                    </button>
+                    <button
+                      class="chipbtn"
+                      :class="{ on: settings.media.parts.bar }"
+                      @click="togglePart('bar')"
+                    >
+                      进度条
+                    </button>
+                  </div>
+                  <span class="val"></span>
+                </div>
+                <div class="row">
                   <span class="lbl">进度条位置</span>
                   <div class="seg grow">
                     <button
@@ -1225,6 +1387,12 @@ onBeforeUnmount(() => {
                       @click="settings.media.bar = 'bottom'"
                     >
                       底部
+                    </button>
+                    <button
+                      :class="{ on: settings.media.bar === 'follow' }"
+                      @click="settings.media.bar = 'follow'"
+                    >
+                      跟随信息
                     </button>
                   </div>
                   <span class="val"></span>
@@ -2034,6 +2202,62 @@ section > h3:first-child {
   border-color: rgba(127, 212, 255, 0.5);
   background: rgba(127, 212, 255, 0.16);
   color: #cfeeff;
+}
+
+/* 媒体控件四个部件：一行放完，点击即切，不占第二行 */
+.partchips {  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.chipbtn {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 4px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 11.5px;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.chipbtn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.chipbtn.on {
+  border-color: rgba(127, 212, 255, 0.48);
+  background: rgba(127, 212, 255, 0.16);
+  color: #a6e3ff;
+}
+
+/* 手填的秒数：只占一小格，别像滑块那样拉满 */
+.num {
+  width: 68px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.82);
+  font-family: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  outline: none;
+}
+
+.num:focus {
+  border-color: rgba(127, 212, 255, 0.5);
 }
 
 .chip-dot {

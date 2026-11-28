@@ -56,6 +56,12 @@ export interface AppSettings {
     locked: boolean
     /** 无播放 / 当前媒体没有歌词时，把词板整个窗口藏起来 */
     hideWhenIdle: boolean
+    /** 暂停超过指定时间后自动隐藏（只是不画，窗口仍在，不挡点击） */
+    hideOnPause: boolean
+    /** 暂停多久后隐藏（秒）。用户手填，10~3600 之间收敛 */
+    pauseDelaySec: number
+    /** 自动隐藏时把信息栏和控件一起藏掉；关着就只藏歌词 */
+    hideMediaOnPause: boolean
   }
   /** 歌词信息：词板上的曲名与封面 */
   info: {
@@ -66,12 +72,21 @@ export interface AppSettings {
     cover: 'left' | 'right' | 'hidden'
     /** 文本位置：曲名歌手在剩余空间里左 / 中 / 右对齐，或不显示 */
     text: 'left' | 'center' | 'right' | 'hidden'
+    /**
+     * 信息文字颜色。词板背景可能是任何颜色（尤其开了封面取色），
+     * 文字用固定的浅色会在浅底上糊掉，所以给用户一个可调项。
+     */
+    color: string
+    /** 没有歌词时，信息栏和控件停在哪一侧 */
+    emptyPos: 'top' | 'bottom'
   }
   /** 媒体操控控件：上一曲 / 播放暂停 / 下一曲 + 进度条 */
   media: {
     show: boolean
-    /** 进度条位置（独立于信息栏，同侧时自动让到内侧） */
-    bar: 'top' | 'bottom'
+    /**
+     * 进度条位置。`follow` = 跟着歌词信息走（同侧时让到内侧）。
+     */
+    bar: 'top' | 'bottom' | 'follow'
     /** 显示时机：一直显示 / 只在鼠标悬停词板时显示 */
     mode: 'always' | 'hover'
     /** 锁定时控件仍可点（只有「一直显示」时可选） */
@@ -83,6 +98,13 @@ export interface AppSettings {
     tint: boolean
     /** 进度条跟随封面取色。关着时是白色（主题色，不可手动改） */
     barTint: boolean
+    /** 四个部件各自的开关。至少要留一个，否则控件等于没开 */
+    parts: {
+      prev: boolean
+      toggle: boolean
+      next: boolean
+      bar: boolean
+    }
   }
   lyric: {
     offsetMs: number
@@ -131,8 +153,16 @@ export const DEFAULTS: AppSettings = {
   },
   view: { rotate: false, translation: false, karaoke: false },
   glass: { tint: '#14141a', alpha: 0.42, always: false, autoColor: false },
-  behavior: { autostart: false, alwaysOnTop: true, locked: false, hideWhenIdle: false },
-  info: { show: false, pos: 'top', cover: 'left', text: 'left' },
+  behavior: {
+    autostart: false,
+    alwaysOnTop: true,
+    locked: false,
+    hideWhenIdle: false,
+    hideOnPause: false,
+    pauseDelaySec: 60,
+    hideMediaOnPause: false,
+  },
+  info: { show: false, pos: 'top', cover: 'left', text: 'left', color: '#ffffff', emptyPos: 'top' },
   media: {
     show: false,
     bar: 'bottom',
@@ -140,6 +170,7 @@ export const DEFAULTS: AppSettings = {
     lockedClickable: false,
     tint: false,
     barTint: false,
+    parts: { prev: true, toggle: true, next: true, bar: true },
   },
   lyric: { offsetMs: 0, player: '', pinPlayer: false, source: '', pick: '' },
 }
@@ -342,6 +373,13 @@ export interface Runtime {
   duration: number
   doc: LyricDoc | null
   loading: boolean
+  /**
+   * 正在向曲库搜索（含换源后的重新搜索）。
+   *
+   * 搜索期间设置页的词源按钮会锁住 —— 连点时几个请求同时跑，谁先回来谁覆盖，
+   * 结果就变成"切过去的那次搜索没生效"。超时兜底在 player.ts 里。
+   */
+  searching: boolean
   trackTitle: string
   trackArtist: string
   trackAlbum: string
@@ -370,6 +408,7 @@ export const runtime = reactive<Runtime>({
   duration: 0,
   doc: null,
   loading: false,
+  searching: false,
   trackTitle: '',
   trackArtist: '',
   trackAlbum: '',

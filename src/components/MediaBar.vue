@@ -9,7 +9,11 @@ import { runtime } from '../core/store'
 import { mediaNext, mediaPrev, mediaToggle } from '../core/bridge'
 
 /** 按钮底色。由 Board.vue 算好传进来（默认暗色，或跟随封面取色） */
-defineProps<{ bg: string }>()
+const props = defineProps<{
+  bg: string
+  /** 三个按钮各自开不开。至少保证有一个（设置页里约束） */
+  parts: { prev: boolean; toggle: boolean; next: boolean; bar: boolean }
+}>()
 
 function prev(): void {
   void mediaPrev()
@@ -26,13 +30,18 @@ function next(): void {
 
 <template>
   <div class="media-bar" :style="{ '--mbtn-bg': bg }">
-    <button class="mbtn" title="上一曲" @click.stop="prev">
+    <button v-if="props.parts.prev" class="mbtn" title="上一曲" @click.stop="prev">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M7 6v12" />
         <path d="M18 6.5 10 12l8 5.5z" fill="currentColor" stroke="none" />
       </svg>
     </button>
-    <button class="mbtn play" :title="runtime.playing ? '暂停' : '播放'" @click.stop="toggle">
+    <button
+      v-if="props.parts.toggle"
+      class="mbtn play"
+      :title="runtime.playing ? '暂停' : '播放'"
+      @click.stop="toggle"
+    >
       <svg
         v-if="runtime.playing"
         viewBox="0 0 24 24"
@@ -48,7 +57,7 @@ function next(): void {
         <path d="M8.5 5.5 19 12 8.5 18.5z" fill="currentColor" stroke="none" />
       </svg>
     </button>
-    <button class="mbtn" title="下一曲" @click.stop="next">
+    <button v-if="props.parts.next" class="mbtn" title="下一曲" @click.stop="next">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M17 6v12" />
         <path d="M6 6.5 14 12l-8 5.5z" fill="currentColor" stroke="none" />

@@ -217,6 +217,48 @@ watch(
   },
 )
 
+/* ------------------------------------------------------- 暂停自动隐藏 */
+
+/**
+ * 暂停一段时间后不画歌词（窗口还在、仍然穿透，只是看不见）。
+ *
+ * 不做窗口级 hide：那样会把"无播放时关闭词板"的停放状态、悬停轮询全搅在一起，
+ * 而且恢复时还要重新走一遍显形流程。这里只是 CSS 不透明度，恢复是即时的。
+ */
+const pausedHidden = ref(false)
+let pauseTimer: number | null = null
+
+function clearPauseTimer(): void {
+  if (pauseTimer !== null) {
+    clearTimeout(pauseTimer)
+    pauseTimer = null
+  }
+}
+
+watch(
+  () => [
+    runtime.playing,
+    settings.behavior.hideOnPause,
+    settings.behavior.pauseDelaySec,
+    !!stageDoc.value,
+  ] as const,
+  ([playing, on, sec, hasDoc]) => {
+    clearPauseTimer()
+    if (!on || playing || !hasDoc) {
+      pausedHidden.value = false
+      return
+    }
+    const ms = Math.max(1, sec) * 1000
+    pauseTimer = window.setTimeout(() => {
+      pausedHidden.value = true
+    }, ms)
+  },
+  { immediate: true },
+)
+
+/** 鼠标悬停时一律不藏 —— 否则用户想看还得先去设置里关掉这个功能 */
+const pausedLyricsHidden = computed(() => pausedHidden.value && !runtime.revealed)
+
 /* ------------------------------------------------------------ 歌词信息 */
 
 /**
@@ -227,15 +269,29 @@ const infoOn = computed(() => settings.info.show)
 const cardPos = computed(() => settings.info.pos)
 const cardCover = computed(() => settings.info.cover)
 const cardText = computed(() => settings.info.text)
-const cardHead = computed(
-  () =>
-    infoOn.value &&
-    (cardCover.value !== 'hidden' || cardText.value !== 'hidden' || mediaOn.value),
-)
 
 /* ------------------------------------------------------------ 媒体控件 */
 
 const mediaOn = computed(() => settings.media.show)
+const mediaParts = computed(() => settings.media.parts)
+
+/** 三个按钮里只要还有一个开着，按钮组就要渲染 */
+const mediaBarOn = computed(
+  () =>
+    mediaOn.value &&
+    (mediaParts.value.prev || mediaParts.value.toggle || mediaParts.value.next),
+)
+/** 进度条是独立的第四个部件 */
+const mediaProgressOn = computed(() => mediaOn.value && mediaParts.value.bar)
+
+const cardHead = computed(
+  () =>
+    infoOn.value &&
+    (cardCover.value !== 'hidden' ||
+      cardText.value !== 'hidden' ||
+      mediaBarOn.value ||
+      mediaProgressOn.value),
+)
 
 /** hover 模式：只有鼠标停在词板上时控件才显形 */
 const mediaHoverOnly = computed(() => settings.media.mode === 'hover')
@@ -265,17 +321,31 @@ const mediaOrder = computed(() => {
 })
 
 /**
+ * 信息栏实际停在哪一侧。
+ *
+ * 有歌词时用用户设的 `pos`；没歌词时（只有信息栏 + 控件留在屏幕上）用 `emptyPos` ——
+ * 无歌词状态常常是"歌刚切、歌词还没回来"或纯音乐，此时按歌词位置摆反而更别扭。
+ */
+const headSide = computed(() =>
+  stageDoc.value ? settings.info.pos : settings.info.emptyPos,
+)
+
+/**
  * 信息栏顺序：舞台固定 0，所以顶部必须是负数。
  * 之前用 top=1 / bottom=3，结果"顶部"永远排到舞台后面 —— 只剩底部能用。
  */
-const headOrder = computed(() => (cardPos.value === 'top' ? -2 : 2))
+const headOrder = computed(() => (headSide.value === 'top' ? -2 : 2))
 
 /**
  * 进度条顺序。规则是「同侧时让到内侧，异侧时贴边」：
  * - 顶部：-1（信息栏在顶部时自然落在它下面，信息在底部时贴面板顶）
  * - 底部：1（信息栏在底部时落在它上面，信息在顶部时贴面板底）
+ * - 跟随：跟信息栏同侧，所以直接按信息栏的位置算
  */
-const barOrder = computed(() => (settings.media.bar === 'top' ? -1 : 1))
+const barOrder = computed(() => {
+  const bar = settings.media.bar === 'follow' ? headSide.value : settings.media.bar
+  return bar === 'top' ? -1 : 1
+})
 
 /**
  * 把控件的实际位置报给 Rust。
@@ -325,9 +395,11 @@ watch(
 
 /** 没有封面时整块按文本位置对齐 */
 const headStyle = computed(() => {
-  if (cardCover.value !== 'hidden') return {}
+  const color = { '--info-color': settings.info.color }
+  if (cardCover.value !== 'hidden') return color
   const t = cardText.value
   return {
+    ...color,
     justifyContent: t === 'center' ? 'center' : t === 'right' ? 'flex-end' : 'flex-start',
   }
 })
@@ -343,13 +415,19 @@ const coverStyle = computed(() =>
 
 
 /** 信息栏挪到底部时，锁定按钮也换到右上角，别和底部那行挤在一起 */
-const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
+const lockOnTop = computed(() => cardHead.value && headSide.value === 'bottom')
 </script>
 
 <template>
   <div
     class="board"
-    :class="{ revealed, locked: runtime.locked, 'glass-always': settings.glass.always }"
+    :class="{
+      revealed,
+      locked: runtime.locked,
+      'glass-always': settings.glass.always,
+      'pause-hidden': pausedLyricsHidden,
+      'pause-hidden-all': pausedLyricsHidden && settings.behavior.hideMediaOnPause,
+    }"
     @pointerdown="onPointerDown"
     @contextmenu="onContextMenu"
   >
@@ -359,7 +437,7 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
       <div
         v-if="cardHead"
         class="card-head"
-        :class="[`pos-${cardPos}`, `cover-${cardCover}`]"
+        :class="[`pos-${headSide}`, `cover-${cardCover}`]"
         :style="{ ...headStyle, order: headOrder }"
       >
         <div
@@ -373,22 +451,20 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
           <div class="artist">{{ runtime.trackArtist || '等待播放器' }}</div>
         </div>
         <MediaBar
-          v-if="mediaOn"
+          v-if="mediaBarOn"
           class="media-slot"
           :style="mediaStyle"
           :bg="mediaBtnBg"
+          :parts="mediaParts"
         />
       </div>
 
       <div class="stage-wrap">
         <LyricStage v-if="stageDoc" :lines="stageDoc.lines" :time="stageTime" />
-        <div v-else class="empty">
-          <div class="empty-text">{{ runtime.loading ? '正在获取歌词…' : runtime.notice }}</div>
-        </div>
       </div>
 
       <MediaProgress
-        v-if="mediaOn"
+        v-if="mediaProgressOn"
         class="mprogress"
         :style="{ order: barOrder }"
         :color="progressColor"
@@ -551,10 +627,26 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
   pointer-events: auto;
 }
 
+/* 暂停超时：只藏歌词，信息栏和控件看设置 */
+.stage-wrap {
+  transition: opacity 240ms ease;
+}
+
+.board.pause-hidden .stage-wrap {
+  opacity: 0;
+}
+
+.board.pause-hidden-all .card-head,
+.board.pause-hidden-all .mprogress {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 240ms ease;
+}
+
 .title {
   font-size: 13px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--info-color, #ffffff);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -562,7 +654,8 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
 
 .artist {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--info-color, #ffffff);
+  opacity: 0.62;
   margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
