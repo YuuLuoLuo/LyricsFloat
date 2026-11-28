@@ -59,9 +59,15 @@ pub fn spawn(app: AppHandle, win: WebviewWindow) {
             let always = GLASS_ALWAYS.load(Ordering::Relaxed);
             let current = REVEALED.load(Ordering::Relaxed);
             let locked_now = LOCKED.load(Ordering::Relaxed);
-            // 锁定 + 媒体控件可点：窗口不能整体穿透（那样 WM_NCHITTEST 收不到），
-            // 改成由窗口过程按控件矩形放行，其余区域返回 HTTRANSPARENT。
-            let media_click = locked_now && MEDIA_CLICKABLE.load(Ordering::Relaxed);
+            // 锁定 + 媒体控件可点：**只在光标真的落在控件上时**才取消穿透。
+            //
+            // 不能用 WM_NCHITTEST 返回 HTTRANSPARENT 来做局部放行 —— 那个码只对
+            // 同一线程的窗口生效，跨进程（游戏、桌面）根本不往上传，结果就是
+            // "控件能点，但整块词板都挡住了下面的点击"。
+            // 改成"光标进控件 -> 窗口可点，离开 -> 立刻恢复穿透"，
+            // 16ms 的切换延迟远小于人手移过去再按下的时间。
+            let media_hot =
+                locked_now && MEDIA_CLICKABLE.load(Ordering::Relaxed) && cursor_in_media(&win);
             // 同理，tao 的整份重写也会把 WS_EX_TRANSPARENT | WS_EX_LAYERED 抹掉。
             // 那两位是"静止态不显形 + 穿透点击"的全部实现 —— 启动即锁定时正好
             // 撞上前端 show()，词板就显了形还挡点击；而 REVEALED 从头到尾都是
@@ -70,7 +76,7 @@ pub fn spawn(app: AppHandle, win: WebviewWindow) {
             //
             // 注意：穿透只切命中测试，**不改窗口透明度**。窗口和歌词一直可见，
             // 「静止态」只是前端把玻璃背景的 opacity 归零。
-            effects::set_click_through(&win, !current && !media_click);
+            effects::set_click_through(&win, !current && !media_hot);
 
             let locked = locked_now;
 
@@ -139,18 +145,49 @@ fn reveal(win: &WebviewWindow, on: bool) {
         effects::set_click_through(win, false);
     } else {
         let always = GLASS_ALWAYS.load(Ordering::Relaxed);
-        let media_click =
-            LOCKED.load(Ordering::Relaxed) && MEDIA_CLICKABLE.load(Ordering::Relaxed);
         if always {
             // 背景常显：留玻璃 + 可见，但点不到
             effects::enable_glass(win, GLASS_COLOR.load(Ordering::Relaxed));
         } else {
             effects::disable_glass(win);
         }
-        effects::set_click_through(win, !media_click);
+        // 收起就是穿透。媒体控件的"局部可点"由主循环按光标位置逐拍决定，
+        // 这里不重复判断 —— 光标都离开了，本来就该穿透。
+        effects::set_click_through(win, true);
     }
     // 刚切过状态，顺手确认一次样式（tao 的其它调用也可能把标题栏塞回来）
     effects::strip_caption(win);
+}
+
+/// 光标是否落在媒体控件的矩形里（窗口内物理像素，由前端上报）
+#[cfg(windows)]
+fn cursor_in_media(win: &WebviewWindow) -> bool {
+    use windows::Win32::Foundation::{HWND, POINT};
+    use windows::Win32::Graphics::Gdi::ScreenToClient;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    let rects = match crate::window::MEDIA_RECTS.lock() {
+        Ok(g) if !g.is_empty() => g.clone(),
+        _ => return false,
+    };
+    let Ok(raw) = win.hwnd() else { return false };
+    let hwnd = HWND(raw.0 as *mut core::ffi::c_void);
+
+    let mut pt = POINT::default();
+    if unsafe { GetCursorPos(&mut pt) }.is_err() {
+        return false;
+    }
+    unsafe {
+        let _ = ScreenToClient(hwnd, &mut pt);
+    }
+    rects
+        .iter()
+        .any(|&(l, t, r, b)| pt.x >= l && pt.x <= r && pt.y >= t && pt.y <= b)
+}
+
+#[cfg(not(windows))]
+fn cursor_in_media(_win: &WebviewWindow) -> bool {
+    false
 }
 
 #[cfg(windows)]

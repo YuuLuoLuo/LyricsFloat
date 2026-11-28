@@ -31,15 +31,10 @@ pub(crate) static MEDIA_CLICKABLE: AtomicBool = AtomicBool::new(false);
 pub(crate) static MEDIA_RECTS: Mutex<Vec<(i32, i32, i32, i32)>> = Mutex::new(Vec::new());
 
 #[tauri::command]
-pub fn set_media_clickable(app: AppHandle, on: bool) {
+pub fn set_media_clickable(on: bool) {
+    // 只存开关。窗口是否穿透由悬停线程按"光标在不在控件上"逐拍决定 ——
+    // 不能在这里直接把整窗设成可点，那会挡住词板下面所有的点击。
     MEDIA_CLICKABLE.store(on, Ordering::Relaxed);
-    // 锁定态下这个开关直接影响穿透方式，立刻按新状态对齐一次
-    if let Some(win) = board(&app) {
-        if LOCKED.load(Ordering::Relaxed) {
-            effects::set_click_through(&win, !on);
-            effects::strip_caption(&win);
-        }
-    }
 }
 
 #[tauri::command]
@@ -177,15 +172,14 @@ fn reveal_on(win: &WebviewWindow) {
 fn reveal_off(win: &WebviewWindow) {
     crate::logbuf::info("悬停收起");
     let always = GLASS_ALWAYS.load(Ordering::Relaxed);
-    // 锁定 + 媒体控件可点：窗口不整体穿透，靠 WM_NCHITTEST 只放行控件矩形
-    let media_click = LOCKED.load(Ordering::Relaxed) && MEDIA_CLICKABLE.load(Ordering::Relaxed);
     if always {
         // 背景常显：关掉亚克力会让 CSS 背景失去系统模糊底衬，看起来像一块死色块
         effects::enable_glass(win, GLASS_COLOR.load(Ordering::Relaxed));
     } else {
         effects::disable_glass(win);
     }
-    effects::set_click_through(win, !media_click);
+    // 媒体控件的局部可点由悬停线程按光标位置处理，这里统一先穿透
+    effects::set_click_through(win, true);
     effects::strip_caption(win);
 }
 
