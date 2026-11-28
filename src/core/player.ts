@@ -30,6 +30,8 @@ let loadToken = 0
 let currentKey = ''
 /** 上一次取词用的词源（空串 = 自动）。用户手动切源时靠它触发重取 */
 let loadedPrefer = ''
+/** 上一次取词用的「用户手动挑的候选」，切源/换曲/重点候选都靠它触发重取 */
+let loadedPick = ''
 
 function buildDoc(): LyricDoc | null {
   if (!raw) return null
@@ -71,10 +73,13 @@ export function reapplyOffset(): void {
 
 async function loadLyric(np: NowPlaying): Promise<void> {
   const key = `${np.title}\u0001${np.artist}`
-  const prefer = settings.lyric.source
   const sameTrack = key === currentKey
-  // 手动切换词源时，同一首歌也要重新取一次
-  if (sameTrack && prefer === loadedPrefer) return
+  // 换歌：上一首手动挑的那条不该带过来
+  if (!sameTrack && settings.lyric.pick) settings.lyric.pick = ''
+  const prefer = settings.lyric.source
+  const pick = settings.lyric.pick
+  // 手动切换词源 / 改选候选时，同一首歌也要重新取一次
+  if (sameTrack && prefer === loadedPrefer && pick === loadedPick) return
   /**
    * 只是换了词源：不重置封面、不置 loading。
    *
@@ -85,6 +90,7 @@ async function loadLyric(np: NowPlaying): Promise<void> {
   const soft = sameTrack
   currentKey = key
   loadedPrefer = prefer
+  loadedPick = pick
   // 换歌后必须丢掉上一首的进度基准，否则新歌起始进度恰好和旧值一样时
   // 会被当成"没变化"，时钟就留在上一首的位置
   lastRawMs = Number.NaN
@@ -107,7 +113,7 @@ async function loadLyric(np: NowPlaying): Promise<void> {
   }
 
   try {
-    const payload = await fetchLyric(np.title, np.artist, np.duration, prefer)
+    const payload = await fetchLyric(np.title, np.artist, np.duration, prefer, pick)
     if (token !== loadToken) return
 
     if (!payload) {
@@ -331,7 +337,8 @@ export async function initPlayer(): Promise<() => void> {
       const np = p as NowPlaying
       if (
         `${np.title}\u0001${np.artist}` !== currentKey ||
-        settings.lyric.source !== loadedPrefer
+        settings.lyric.source !== loadedPrefer ||
+        settings.lyric.pick !== loadedPick
       ) {
         void loadLyric(np)
       }
@@ -339,6 +346,7 @@ export async function initPlayer(): Promise<() => void> {
     onStopped: () => {
       currentKey = ''
       loadedPrefer = ''
+      loadedPick = ''
       raw = null
       lastRawMs = Number.NaN
       rawChangedAt = 0

@@ -115,15 +115,31 @@ pub async fn fetch_lyric(
     artist: String,
     duration: f64,
     prefer: Option<String>,
+    pick: Option<String>,
 ) -> Result<Option<LyricResult>, String> {
     let prefer = prefer.unwrap_or_default();
-    tauri::async_runtime::spawn_blocking(move || fetch_sync(&title, &artist, duration, &prefer))
-        .await
-        .map_err(|e| e.to_string())
+    let pick = pick.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || {
+        fetch_sync(&title, &artist, duration, &prefer, &pick)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
-fn fetch_sync(title: &str, artist: &str, duration: f64, prefer: &str) -> Option<LyricResult> {
-    let key = cache_key(title, artist, prefer);
+/// 候选的稳定标识：用户点了某一条就把它记下来，下次按这个直接取那一份。
+/// 不用下标 —— 同一个源的结果顺序不保证稳定。
+fn candidate_id(c: &LyricCandidate) -> String {
+    format!("{}|{}|{}", c.source_id, c.title, c.artist)
+}
+
+fn fetch_sync(
+    title: &str,
+    artist: &str,
+    duration: f64,
+    prefer: &str,
+    pick: &str,
+) -> Option<LyricResult> {
+    let key = cache_key(title, artist, prefer, pick);
     if let Some(hit) = read_cache(&key) {
         crate::logbuf::info(&format!(
             "歌词命中缓存：{title} - {artist}（{} → {} / {}）",
@@ -151,10 +167,47 @@ fn fetch_sync(title: &str, artist: &str, duration: f64, prefer: &str) -> Option<
 
     let t0 = Instant::now();
     let (cands, handles) = collect(title, artist, duration, prefer);
-    // 先发一份没有选中的：用户切到歌词页就能看到搜索结果，
-    // 不用等下面那串"逐个试歌词"跑完。
-    publish_candidates(title, artist, prefer, &cands, None);
 
+    // 用户手动点过某一条：只用它。这一条取不到就当没有 ——
+    // 悄悄退回打分最优会让人以为"点了没生效"。
+    if !pick.is_empty() {
+        publish_candidates(title, artist, prefer, &cands, None);
+        let idx = cands.iter().position(|c| candidate_id(c) == pick)?;
+        match take_lyric(&handles[idx]) {
+            Some(r) => {
+                crate::logbuf::info(&format!(
+                    "歌词按用户选择装载：{title} - {artist} → {} / {}（{}，耗时 {}ms）",
+                    r.matched_title,
+                    r.matched_artist,
+                    r.source,
+                    t0.elapsed().as_millis()
+                ));
+                write_cache(&key, &r);
+                publish_candidates(title, artist, prefer, &cands, Some(idx));
+                Some(r)
+            }
+            None => {
+                crate::logbuf::warn(&format!("用户选中的候选没有有效歌词：{pick}"));
+                None
+            }
+        }
+    } else {
+        publish_candidates(title, artist, prefer, &cands, None);
+        pick_best(title, artist, duration, prefer, &key, t0, cands, handles)
+    }
+}
+
+/// 自动模式：按分数从高到低逐个试，第一份真能取出歌词的胜出。
+fn pick_best(
+    title: &str,
+    artist: &str,
+    _duration: f64,
+    prefer: &str,
+    key: &str,
+    t0: Instant,
+    cands: Vec<LyricCandidate>,
+    handles: Vec<Handle>,
+) -> Option<LyricResult> {
     // 分数从高到低逐个试：最高分那条也可能挂着「暂无歌词」
     let mut order: Vec<usize> = (0..cands.len()).collect();
     order.sort_by(|a, b| {
@@ -177,7 +230,7 @@ fn fetch_sync(title: &str, artist: &str, duration: f64, prefer: &str) -> Option<
                 cands[idx].score as i64,
                 t0.elapsed().as_millis()
             ));
-            write_cache(&key, &r);
+            write_cache(key, &r);
             publish_candidates(title, artist, prefer, &cands, Some(idx));
             return Some(r);
         }
@@ -808,13 +861,14 @@ fn encode(s: &str) -> String {
 /// 缓存 key 里带上词源偏好和匹配算法版本：
 /// - 偏好：手动切到 LRCLIB 时不该读到自动模式缓存的网易云结果
 /// - 版本：改了打分规则，旧结果自动作废，用户不用手动清缓存
-fn cache_key(title: &str, artist: &str, prefer: &str) -> String {
+fn cache_key(title: &str, artist: &str, prefer: &str, pick: &str) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let seed = format!(
-        "{}\u{1}{}\u{1}{}\u{1}v{}",
+        "{}\u{1}{}\u{1}{}\u{1}{}\u{1}v{}",
         norm(title),
         norm(artist),
         prefer,
+        pick,
         MATCH_VERSION
     );
     for b in seed.as_bytes() {
@@ -1032,9 +1086,11 @@ mod tests {
 
     #[test]
     fn cache_key_differs_by_prefer_and_version() {
-        let a = cache_key("晴天", "周杰伦", "");
-        let b = cache_key("晴天", "周杰伦", "lrclib");
+        let a = cache_key("晴天", "周杰伦", "", "");
+        let b = cache_key("晴天", "周杰伦", "lrclib", "");
+        let c = cache_key("晴天", "周杰伦", "", "netease|晴天|周杰伦");
         assert_ne!(a, b, "不同词源共用了同一个缓存键");
+        assert_ne!(a, c, "手动选中的候选没进缓存键");
         assert_eq!(a.len(), 16);
     }
 

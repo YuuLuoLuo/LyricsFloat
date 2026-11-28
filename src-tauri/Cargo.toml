@@ -1,6 +1,6 @@
 [package]
 name = "lyricsfloat"
-version = "26.11.14"
+version = "26.11.15"
 description = "LyricsFloat — 桌面悬浮歌词：全透明、鼠标穿透、悬停显形"
 license = "MIT"
 authors = ["羽洛洛 (YuLuo)"]

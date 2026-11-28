@@ -10,7 +10,7 @@ import { exportSettingsFile, importSettingsFile, initSettingsFile } from '../cor
 import { ABOUT } from '../core/about'
 import type { LyricLine } from '../core/types'
 import type { PlayerInfo } from '../core/bridge'
-import type { CandidateBoard } from '../core/bridge'
+import type { CandidateBoard, LyricCandidate } from '../core/bridge'
 import {
   appVersion,
   checkUpdate,
@@ -261,6 +261,20 @@ const candList = computed(() => {
  */
 function pickSource(id: string): void {
   settings.lyric.source = id
+  // 换了库，之前从那一个库里挑的那条已经不适用了
+  settings.lyric.pick = ''
+  saveSettings()
+}
+
+/** 候选的稳定标识，与 Rust 侧 candidate_id 一致 */
+function candidateId(c: LyricCandidate): string {
+  return `${c.source_id}|${c.title}|${c.artist}`
+}
+
+/** 点一条候选就用它；再点一次取消，回到自动打分 */
+function pickCandidate(c: LyricCandidate): void {
+  const id = candidateId(c)
+  settings.lyric.pick = settings.lyric.pick === id ? '' : id
   saveSettings()
 }
 
@@ -1015,10 +1029,17 @@ onBeforeUnmount(() => {
             </p>
 
             <div v-if="candList.length" class="candbox">
-              <div v-for="(c, i) in candList" :key="i" class="cand" :class="{ cur: c.chosen }">
+              <div
+                v-for="(c, i) in candList"
+                :key="i"
+                class="cand"
+                :class="{ cur: c.chosen, picked: candidateId(c) === settings.lyric.pick }"
+                :title="c.title ? `${c.title} — ${c.artist}` : ''"
+                @click="pickCandidate(c)"
+              >
                 <span class="csrc">{{ c.source }}</span>
-                <span class="cname" :title="c.title">{{ c.title || '未知曲目' }}</span>
-                <span class="cart" :title="c.artist">{{ c.artist || '未知歌手' }}</span>
+                <span class="cname">{{ c.title || '未知曲目' }}</span>
+                <span class="cart">{{ c.artist || '未知歌手' }}</span>
                 <span class="cdur">{{ c.duration > 1 ? fmtTime(c.duration) : '—' }}</span>
                 <span class="ctag" :class="{ off: !c.synced }">
                   {{ c.synced ? '时间轴' : '纯文本' }}
@@ -1026,6 +1047,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <p v-else class="hint">还没有搜索结果。</p>
+            <p v-if="candList.length" class="hint">点一条就用那份歌词，再点一次取消。</p>
             <p v-if="lyricSource" class="hint">
               歌词来自第三方曲库，可能存在错字、缺句或时间轴偏差；整体快了慢了可用下方「时间偏移」微调。
             </p>
@@ -1771,6 +1793,18 @@ section > h3:first-child {
   line-height: 1.5;
   color: rgba(255, 255, 255, 0.54);
   border-top: 1px solid rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.cand:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.78);
+}
+
+/* 用户手动点中的那条：左侧加一条竖线，和"自动选中的"区分开 */
+.cand.picked {
+  box-shadow: inset 2px 0 0 #7fd4ff;
 }
 
 .cand:first-child {

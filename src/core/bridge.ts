@@ -39,8 +39,14 @@ export interface LyricPayload {
 }
 
 /** 词源偏好：空串 = 自动（三源打分取最优），其余只查指定源 */
-export function fetchLyric(title: string, artist: string, duration: number, prefer = '') {
-  return call<LyricPayload | null>('fetch_lyric', { title, artist, duration, prefer })
+export function fetchLyric(
+  title: string,
+  artist: string,
+  duration: number,
+  prefer = '',
+  pick = '',
+) {
+  return call<LyricPayload | null>('fetch_lyric', { title, artist, duration, prefer, pick })
 }
 
 /** 一条歌词候选，设置页「歌词源」板块用 */

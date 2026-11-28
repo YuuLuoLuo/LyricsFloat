@@ -82,6 +82,11 @@ export interface AppSettings {
      * 手动指定后只用那一个源，它没歌词就是没歌词，不再跨源兜底。
      */
     source: string
+    /**
+     * 用户从搜索结果里点中的那一条，格式 `词源id|歌名|歌手`。
+     * 空串 = 不指定，用自动打分。换歌或换词源时清空。
+     */
+    pick: string
   }
 }
 
@@ -111,7 +116,7 @@ export const DEFAULTS: AppSettings = {
   glass: { tint: '#14141a', alpha: 0.42, always: false, autoColor: false },
   behavior: { autostart: false, alwaysOnTop: true, locked: false, hideWhenIdle: false },
   info: { show: false, pos: 'top', cover: 'left', text: 'left' },
-  lyric: { offsetMs: 0, player: '', pinPlayer: false, source: '' },
+  lyric: { offsetMs: 0, player: '', pinPlayer: false, source: '', pick: '' },
 }
 
 const KEY = 'lyricsfloat.settings.v3'
