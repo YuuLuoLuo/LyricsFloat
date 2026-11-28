@@ -287,8 +287,12 @@ const mediaBarOn = computed(
     mediaOn.value &&
     (mediaParts.value.prev || mediaParts.value.toggle || mediaParts.value.next),
 )
-/** 进度条是独立的第四个部件 */
-const mediaProgressOn = computed(() => mediaOn.value && mediaParts.value.bar)
+/**
+ * 进度条是独立的第四个部件，但它挂在信息栏那一块上（顶/底、避让、跟随都按信息栏算）。
+ * 关掉「显示歌词信息」时信息栏整条不在，进度条也不能自己留着 ——
+ * 它是 `<MediaProgress>` 独立渲染的，不跟着 cardHead 走，所以这里显式带上 infoOn。
+ */
+const mediaProgressOn = computed(() => infoOn.value && mediaOn.value && mediaParts.value.bar)
 
 const cardHead = computed(
   () =>
