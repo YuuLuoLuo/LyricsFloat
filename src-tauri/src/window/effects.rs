@@ -123,25 +123,26 @@ pub fn strip_caption(win: &WebviewWindow) -> bool {
 /// 穿透只需要扩展样式里的 `WS_EX_TRANSPARENT`：命中测试当场生效，不必重算框架。
 /// 而 tao 的版本每调一次都要重写整份窗口样式 + `SWP_FRAMECHANGED` ——
 /// 悬停进出各一次，正好是最频繁触发上面那条标题栏的动作。
-pub fn set_click_through(win: &WebviewWindow, on: bool) {
-    set_passthrough(win, on, false);
-}
-
-/// 穿透 + 是否可见。
+/// 只切点击穿透，**不动窗口透明度**。
 ///
-/// `WS_EX_LAYERED` 的窗口如果不显式给 alpha，系统就当作全透明 ——
-/// 这正是"静止态隐形"的老实现。但「背景常显」要求"看不见交互、但看得见背景"，
-/// 那就得给一个 255 的 alpha 让它画出来，同时靠 `WS_EX_TRANSPARENT` 让点击穿过去。
-pub fn set_passthrough(win: &WebviewWindow, on: bool, visible: bool) {
+/// 这里踩过一次大坑：曾经以为「静止态隐形」是靠 `WS_EX_LAYERED` 不给 alpha，
+/// 于是顺手调 `SetLayeredWindowAttributes(alpha = 0)`，结果整个窗口（连歌词一起）
+/// 变成全透明 —— 词板再也不显示，只在 tao 重写样式的那一瞬闪一下。
+///
+/// 实际情况是：窗口**始终可见**，歌词一直画着；"静止态不显形"只是前端把玻璃背景
+/// 的 CSS opacity 归零而已。窗口层面的隐形只有「无播放时关闭词板」的 `hide()`。
+/// 所以这里只碰 `WS_EX_TRANSPARENT`（穿透），并顺手把 alpha 保证为 255，
+/// 免得历史版本留下的 0 继续生效。
+pub fn set_click_through(win: &WebviewWindow, on: bool) {
     #[cfg(target_os = "windows")]
     {
         if let Some(hwnd) = hwnd_of(win) {
-            imp::set_ex_transparent(hwnd, on, visible);
+            imp::set_ex_transparent(hwnd, on);
         }
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (win, on, visible);
+        let _ = (win, on);
     }
 }
 
@@ -357,19 +358,16 @@ mod imp {
 
     /// 只动扩展样式：加/减 `WS_EX_TRANSPARENT`（附带 `WS_EX_LAYERED`，
     /// 与 tao 的做法保持一致），不碰 GWL_STYLE，也就不会触发框架重算。
-    /// 上一次写下去的 (穿透, 可见) 组合，避免每拍都调 SetLayeredWindowAttributes
-    static LAST_LAYER: std::sync::atomic::AtomicU32 =
-        std::sync::atomic::AtomicU32::new(u32::MAX);
-
-    /// 上一次写下去的 (穿透, 可见) 组合，避免每拍都调 SetLayeredWindowAttributes
-    pub fn set_ex_transparent(hwnd: HWND, on: bool, visible: bool) {
-        use std::sync::atomic::Ordering;
+    ///
+    /// **绝不按状态设 alpha**：窗口要一直可见，歌词才画得出来。这里只做一件事 ——
+    /// 带 `WS_EX_LAYERED` 时把 alpha 兜底成 255，防止被历史版本或系统写成 0，
+    /// 那样整窗不合成、词板就彻底看不见了。稳态下是"读一次、比一下"，不写。
+    pub fn set_ex_transparent(hwnd: HWND, on: bool) {
         use windows::Win32::Foundation::COLORREF;
         use windows::Win32::UI::WindowsAndMessaging::{
-            SetLayeredWindowAttributes, GWL_EXSTYLE, LWA_ALPHA,
+            GetLayeredWindowAttributes, SetLayeredWindowAttributes, GWL_EXSTYLE, LWA_ALPHA,
         };
 
-        let state = ((on as u32) << 1) | (visible as u32);
         unsafe {
             let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
             let next = if on {
@@ -377,8 +375,7 @@ mod imp {
             } else {
                 ex & !(WS_EX_TRANSPARENT.0 | WS_EX_LAYERED.0)
             };
-            let style_changed = next != ex;
-            if style_changed {
+            if next != ex {
                 SetWindowLongW(hwnd, GWL_EXSTYLE, next as i32);
                 // 扩展样式不影响框架，只要让系统重新算一次命中测试
                 let _ = SetWindowPos(
@@ -392,13 +389,15 @@ mod imp {
                 );
             }
 
-            // 只有带 WS_EX_LAYERED 时才谈得上 alpha；关掉穿透时窗口走普通绘制路径。
-            // 样式位被 tao 改写后 LAYERED 会重新出现，那时 alpha 也得跟着补一次，
-            // 所以 style_changed 也要触发。
-            let changed = LAST_LAYER.swap(state, Ordering::Relaxed) != state;
-            if on && (style_changed || changed) {
-                let alpha: u8 = if visible { 255 } else { 0 };
-                let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), alpha, LWA_ALPHA);
+            if !on {
+                return;
+            }
+            // 有 LAYERED 就必须有 alpha，否则 DWM 按 0 合成 —— 整窗连歌词一起消失。
+            let mut alpha: u8 = 0;
+            let mut flags = LWA_ALPHA;
+            let ok = GetLayeredWindowAttributes(hwnd, None, Some(&mut alpha), Some(&mut flags));
+            if ok.is_err() || alpha != 255 {
+                let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
             }
         }
     }

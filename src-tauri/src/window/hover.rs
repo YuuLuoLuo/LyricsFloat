@@ -63,12 +63,14 @@ pub fn spawn(app: AppHandle, win: WebviewWindow) {
             // 改成由窗口过程按控件矩形放行，其余区域返回 HTTRANSPARENT。
             let media_click = locked_now && MEDIA_CLICKABLE.load(Ordering::Relaxed);
             // 同理，tao 的整份重写也会把 WS_EX_TRANSPARENT | WS_EX_LAYERED 抹掉。
-            // 那两位是"静止态隐形 + 穿透点击"的全部实现 —— 启动即锁定时正好
+            // 那两位是"静止态不显形 + 穿透点击"的全部实现 —— 启动即锁定时正好
             // 撞上前端 show()，词板就显了形还挡点击；而 REVEALED 从头到尾都是
             // false，等不到一次状态切换去补救。所以这里每拍对齐一次：
             // 与目标状态一致时是两次 GetWindowLongW，不一致才写。
-            // 「背景常显」开着时穿透但保留可见（alpha 255），否则维持老样子（隐形）。
-            effects::set_passthrough(&win, !current && !media_click, current || always);
+            //
+            // 注意：穿透只切命中测试，**不改窗口透明度**。窗口和歌词一直可见，
+            // 「静止态」只是前端把玻璃背景的 opacity 归零。
+            effects::set_click_through(&win, !current && !media_click);
 
             let locked = locked_now;
 
@@ -145,7 +147,7 @@ fn reveal(win: &WebviewWindow, on: bool) {
         } else {
             effects::disable_glass(win);
         }
-        effects::set_passthrough(win, !media_click, always);
+        effects::set_click_through(win, !media_click);
     }
     // 刚切过状态，顺手确认一次样式（tao 的其它调用也可能把标题栏塞回来）
     effects::strip_caption(win);

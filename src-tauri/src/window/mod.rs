@@ -36,8 +36,7 @@ pub fn set_media_clickable(app: AppHandle, on: bool) {
     // 锁定态下这个开关直接影响穿透方式，立刻按新状态对齐一次
     if let Some(win) = board(&app) {
         if LOCKED.load(Ordering::Relaxed) {
-            let always = GLASS_ALWAYS.load(Ordering::Relaxed);
-            effects::set_passthrough(&win, !on, always || !on);
+            effects::set_click_through(&win, !on);
             effects::strip_caption(&win);
         }
     }
@@ -186,7 +185,7 @@ fn reveal_off(win: &WebviewWindow) {
     } else {
         effects::disable_glass(win);
     }
-    effects::set_passthrough(win, !media_click, always);
+    effects::set_click_through(win, !media_click);
     effects::strip_caption(win);
 }
 
