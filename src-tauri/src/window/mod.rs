@@ -2,6 +2,7 @@ pub mod effects;
 mod hover;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
@@ -20,6 +21,34 @@ pub(crate) static PEEK_UNTIL: AtomicU64 = AtomicU64::new(0);
 /// 背景常显：锁定或鼠标离开时仍保留玻璃背景（只是点不到）。
 /// 关着的时候静止态是"完全透明 + 穿透"，开着就变成"看得见但穿透"。
 pub(crate) static GLASS_ALWAYS: AtomicBool = AtomicBool::new(false);
+/// 锁定状态下媒体控件是否可以点。
+///
+/// 不能靠"整窗不穿透"实现 —— 词板一块区域会挡住下面所有点击，锁定就失去意义了。
+/// 真正的做法是窗口照常收消息，但 `WM_NCHITTEST` 只让控件矩形返回 HTCLIENT，
+/// 其余返回 HTTRANSPARENT（穿透到下层）。
+pub(crate) static MEDIA_CLICKABLE: AtomicBool = AtomicBool::new(false);
+/// 媒体控件在窗口内的物理像素矩形，可以有多块（按钮栏 + 进度条）
+pub(crate) static MEDIA_RECTS: Mutex<Vec<(i32, i32, i32, i32)>> = Mutex::new(Vec::new());
+
+#[tauri::command]
+pub fn set_media_clickable(app: AppHandle, on: bool) {
+    MEDIA_CLICKABLE.store(on, Ordering::Relaxed);
+    // 锁定态下这个开关直接影响穿透方式，立刻按新状态对齐一次
+    if let Some(win) = board(&app) {
+        if LOCKED.load(Ordering::Relaxed) {
+            let always = GLASS_ALWAYS.load(Ordering::Relaxed);
+            effects::set_passthrough(&win, !on, always || !on);
+            effects::strip_caption(&win);
+        }
+    }
+}
+
+#[tauri::command]
+pub fn set_media_rects(rects: Vec<(i32, i32, i32, i32)>) {
+    if let Ok(mut g) = MEDIA_RECTS.lock() {
+        *g = rects;
+    }
+}
 
 pub(crate) fn now_ms() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -148,15 +177,16 @@ fn reveal_on(win: &WebviewWindow) {
 
 fn reveal_off(win: &WebviewWindow) {
     crate::logbuf::info("悬停收起");
-    if GLASS_ALWAYS.load(Ordering::Relaxed) {
-        // 背景常显：留着玻璃，只是让它点不到。
-        // 关掉亚克力会让 CSS 背景失去系统模糊底衬，看起来像一块死色块。
+    let always = GLASS_ALWAYS.load(Ordering::Relaxed);
+    // 锁定 + 媒体控件可点：窗口不整体穿透，靠 WM_NCHITTEST 只放行控件矩形
+    let media_click = LOCKED.load(Ordering::Relaxed) && MEDIA_CLICKABLE.load(Ordering::Relaxed);
+    if always {
+        // 背景常显：关掉亚克力会让 CSS 背景失去系统模糊底衬，看起来像一块死色块
         effects::enable_glass(win, GLASS_COLOR.load(Ordering::Relaxed));
-        effects::set_passthrough(win, true, true);
     } else {
         effects::disable_glass(win);
-        effects::set_click_through(win, true);
     }
+    effects::set_passthrough(win, !media_click, always);
     effects::strip_caption(win);
 }
 

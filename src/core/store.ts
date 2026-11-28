@@ -67,6 +67,16 @@ export interface AppSettings {
     /** 文本位置：曲名歌手在剩余空间里左 / 中 / 右对齐，或不显示 */
     text: 'left' | 'center' | 'right' | 'hidden'
   }
+  /** 媒体操控控件：上一曲 / 播放暂停 / 下一曲 + 进度条 */
+  media: {
+    show: boolean
+    /** 进度条位置（独立于信息栏，同侧时自动让到内侧） */
+    bar: 'top' | 'bottom'
+    /** 显示时机：一直显示 / 只在鼠标悬停词板时显示 */
+    mode: 'always' | 'hover'
+    /** 锁定时控件仍可点（只有「一直显示」时可选） */
+    lockedClickable: boolean
+  }
   lyric: {
     offsetMs: number
     /**
@@ -116,6 +126,7 @@ export const DEFAULTS: AppSettings = {
   glass: { tint: '#14141a', alpha: 0.42, always: false, autoColor: false },
   behavior: { autostart: false, alwaysOnTop: true, locked: false, hideWhenIdle: false },
   info: { show: false, pos: 'top', cover: 'left', text: 'left' },
+  media: { show: false, bar: 'bottom', mode: 'hover', lockedClickable: false },
   lyric: { offsetMs: 0, player: '', pinPlayer: false, source: '', pick: '' },
 }
 

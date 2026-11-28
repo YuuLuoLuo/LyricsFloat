@@ -410,6 +410,41 @@ export async function setGlassColor(tint: string, alpha: number): Promise<void> 
   await call('set_glass_color', { tint, alpha })
 }
 
+/* --------------------------------------------------------------- 媒体控制 */
+
+/** 播放 / 暂停。返回播放器是否真的接受了这次操作 */
+export async function mediaToggle(): Promise<boolean> {
+  return (await call<boolean>('media_toggle')) ?? false
+}
+
+export async function mediaNext(): Promise<boolean> {
+  return (await call<boolean>('media_next')) ?? false
+}
+
+export async function mediaPrev(): Promise<boolean> {
+  return (await call<boolean>('media_prev')) ?? false
+}
+
+/** 跳转进度（秒） */
+export async function mediaSeek(position: number): Promise<boolean> {
+  return (await call<boolean>('media_seek', { position })) ?? false
+}
+
+/**
+ * 锁定时媒体控件是否可点。
+ *
+ * 开启后窗口不再整体穿透，改由窗口过程按控件矩形放行
+ * （其余区域返回 HTTRANSPARENT，点击照常落到下面的窗口上）。
+ */
+export async function setMediaClickable(on: boolean): Promise<void> {
+  await call('set_media_clickable', { on })
+}
+
+/** 上报控件在窗口内的物理像素矩形（按钮栏 + 进度条），供 WM_NCHITTEST 判断 */
+export async function setMediaRects(rects: [number, number, number, number][]): Promise<void> {
+  await call('set_media_rects', { rects })
+}
+
 const POS_KEY = 'lyricsfloat.pos'
 /** 改名前的键，读到就当新键用并迁过去 */
 const POS_KEY_OLD = 'lyricboard.pos'

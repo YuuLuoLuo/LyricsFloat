@@ -432,7 +432,35 @@ mod imp {
             WM_NCPAINT => return LRESULT(0),
             // 命中测试：整窗都是客户区。WS_EX_TRANSPARENT（穿透）在更上层拦，
             // 不会走到这里。
-            WM_NCHITTEST => return LRESULT(1), // HTCLIENT
+            //
+            // 例外：锁定 + 媒体控件可点。这时窗口刻意不穿透（否则这里根本不生效），
+            // 由这里按坐标放行 —— 只有控件矩形算客户区，其余返回 HTTRANSPARENT
+            // 让点击落到下面的窗口/游戏上。
+            WM_NCHITTEST => {
+                if crate::window::MEDIA_CLICKABLE.load(std::sync::atomic::Ordering::Relaxed) {
+                    use windows::Win32::Foundation::POINT;
+                    use windows::Win32::Graphics::Gdi::ScreenToClient;
+                    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+                    let mut pt = POINT::default();
+                    if GetCursorPos(&mut pt).is_ok() {
+                        let _ = ScreenToClient(hwnd, &mut pt);
+                        let inside = crate::window::MEDIA_RECTS
+                            .lock()
+                            .map(|g| {
+                                g.iter().any(|&(l, t, r, b)| {
+                                    pt.x >= l && pt.x <= r && pt.y >= t && pt.y <= b
+                                })
+                            })
+                            .unwrap_or(false);
+                        if inside {
+                            return LRESULT(1); // HTCLIENT：控件收得到点击
+                        }
+                    }
+                    return LRESULT(-1); // HTTRANSPARENT：穿透到下层
+                }
+                return LRESULT(1); // HTCLIENT
+            }
             _ => {}
         }
         DefSubclassProc(hwnd, msg, wparam, lparam)

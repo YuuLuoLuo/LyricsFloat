@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import LyricStage from './LyricStage.vue'
+import MediaBar from './MediaBar.vue'
+import MediaProgress from './MediaProgress.vue'
 import { settings, runtime, glassVisible } from '../core/store'
 import {
   applyBoard,
@@ -11,6 +13,8 @@ import {
   onMoved,
   setLocked,
   setGlassColor,
+  setMediaClickable,
+  setMediaRects,
   startDragging,
 } from '../core/bridge'
 
@@ -102,7 +106,14 @@ function quitFromMenu() {
 let offMoved: (() => void) | null = null
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
+/** 窗口尺寸变了，控件矩形跟着变，锁定时可点要靠它才算得准 */
+function onResize(): void {
+  void nextTick(reportRects)
+}
+
 onMounted(async () => {
+  window.addEventListener('resize', onResize)
+  void nextTick(reportRects)
   if (!isTauri) return
   // 窗口尺寸以 settings 为准，挂载时对齐一次
   void applyBoard(settings)
@@ -114,6 +125,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
   offMoved?.()
   if (saveTimer) clearTimeout(saveTimer)
   window.removeEventListener('blur', closeMenu)
@@ -152,7 +164,97 @@ const cardPos = computed(() => settings.info.pos)
 const cardCover = computed(() => settings.info.cover)
 const cardText = computed(() => settings.info.text)
 const cardHead = computed(
-  () => infoOn.value && (cardCover.value !== 'hidden' || cardText.value !== 'hidden'),
+  () =>
+    infoOn.value &&
+    (cardCover.value !== 'hidden' || cardText.value !== 'hidden' || mediaOn.value),
+)
+
+/* ------------------------------------------------------------ 媒体控件 */
+
+const mediaOn = computed(() => settings.media.show)
+
+/** hover 模式：只有鼠标停在词板上时控件才显形 */
+const mediaHoverOnly = computed(() => settings.media.mode === 'hover')
+
+/**
+ * 媒体控件开着时文本不再允许居中 —— 控件要贴在文本的反侧，
+ * 文本居中就没地方摆了（设置页里那一项也会被禁用）。
+ */
+const effectiveText = computed(() => {
+  const t = cardText.value
+  return mediaOn.value && t === 'center' ? 'left' : t
+})
+
+/** 按钮组在文本反侧：文本左 -> 控件右；文本右 -> 控件左 */
+const mediaStyle = computed(() => {
+  const right = effectiveText.value !== 'right'
+  return {
+    order: right ? '2' : '-1',
+    marginLeft: right ? 'auto' : '0',
+  }
+})
+
+/** 信息栏顺序：在顶部 1、在底部 3（舞台固定 0） */
+const headOrder = computed(() => (cardPos.value === 'top' ? 1 : 3))
+
+/**
+ * 进度条顺序。规则是「同侧时让到内侧，异侧时贴边」：
+ * - 顶部 + 信息也在顶部 -> 2（信息下面）
+ * - 顶部 + 信息在底部 -> -1（贴面板顶）
+ * - 底部 + 信息在顶部 -> 5（贴面板底）
+ * - 底部 + 信息也在底部 -> 2（信息上面）
+ */
+const barOrder = computed(() => {
+  const top = settings.media.bar === 'top'
+  const headTop = cardPos.value === 'top'
+  if (top) return headTop ? 2 : -1
+  return headTop ? 5 : 2
+})
+
+/**
+ * 把控件的实际位置报给 Rust。
+ *
+ * 锁定且允许点击时，窗口不整体穿透，改由 WM_NCHITTEST 按这些矩形放行 ——
+ * 不报的话 Rust 不知道控件在哪，只能整窗穿透，按钮就点不动。
+ */
+function reportRects(): void {
+  if (!isTauri) return
+  const dpr = window.devicePixelRatio || 1
+  const rects: [number, number, number, number][] = []
+  for (const sel of ['.media-bar', '.mprogress']) {
+    const el = document.querySelector(sel) as HTMLElement | null
+    if (!el) continue
+    const r = el.getBoundingClientRect()
+    if (r.width <= 0 || r.height <= 0) continue
+    rects.push([
+      Math.round(r.left * dpr),
+      Math.round(r.top * dpr),
+      Math.round(r.right * dpr),
+      Math.round(r.bottom * dpr),
+    ])
+  }
+  void setMediaRects(rects)
+}
+
+watch(
+  () => [settings.media.show, settings.media.mode, settings.media.lockedClickable] as const,
+  () => {
+    // 只有「一直显示 + 锁定可点」组合才有意义：
+    // hover 模式下锁定时控件本来就不显形，让点击生效等于留一块隐形热区。
+    const on =
+      settings.media.show &&
+      settings.media.mode === 'always' &&
+      settings.media.lockedClickable
+    if (isTauri) void setMediaClickable(on)
+    void nextTick(reportRects)
+  },
+  { immediate: true },
+)
+
+// 位置相关的设置一变就要重新上报（文本/封面位置改了，控件会挪地方）
+watch(
+  () => [cardPos.value, cardText.value, cardCover.value, settings.media.bar] as const,
+  () => void nextTick(reportRects),
 )
 
 /** 没有封面时整块按文本位置对齐 */
@@ -165,7 +267,7 @@ const headStyle = computed(() => {
 })
 
 const metaStyle = computed(() => ({
-  textAlign: cardText.value === 'hidden' ? 'left' : cardText.value,
+  textAlign: effectiveText.value === 'hidden' ? 'left' : effectiveText.value,
 }))
 
 /** 播放器给了封面就铺上去，没给就保持默认的渐变色块 */
@@ -187,12 +289,12 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
   >
     <div class="glass" :style="glassStyle"></div>
 
-    <div class="content" :class="{ 'card-mode': infoOn }">
+    <div class="content" :class="{ 'card-mode': infoOn, 'media-hover': mediaHoverOnly }">
       <div
         v-if="cardHead"
         class="card-head"
         :class="[`pos-${cardPos}`, `cover-${cardCover}`]"
-        :style="headStyle"
+        :style="{ ...headStyle, order: headOrder }"
       >
         <div
           v-if="cardCover !== 'hidden'"
@@ -204,6 +306,7 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
           <div class="title">{{ runtime.trackTitle || '未在播放' }}</div>
           <div class="artist">{{ runtime.trackArtist || '等待播放器' }}</div>
         </div>
+        <MediaBar v-if="mediaOn" class="media-slot" :style="mediaStyle" />
       </div>
 
       <div class="stage-wrap">
@@ -212,6 +315,8 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
           <div class="empty-text">{{ runtime.loading ? '正在获取歌词…' : runtime.notice }}</div>
         </div>
       </div>
+
+      <MediaProgress v-if="mediaOn" class="mprogress" :style="{ order: barOrder }" />
     </div>
 
     <button
@@ -303,18 +408,19 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
   position: relative;
 }
 
-/* 信息栏在底部时，整块排到舞台后面去（顺序反转，不挪 DOM） */
-.card-head.pos-bottom {
-  order: 2;
+/* 信息栏在底部时，整块排到舞台后面去（顺序由 inline order 决定，这里不写死） */
+
+/* 封面在右：靠 order 排到最后，不用 row-reverse（反转会把控件的顺序也带着翻） */
+.card-head.cover-right .cover {
+  order: 3;
 }
 
-/* 封面在右：反转主轴，就是 [文本][封面] */
-.card-head.cover-right {
-  flex-direction: row-reverse;
+.card-head.cover-left .cover {
+  order: 0;
 }
 
-.card-head.cover-left {
-  justify-content: flex-start;
+.card-head .meta {
+  order: 1;
 }
 
 .card-head {
@@ -346,6 +452,26 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
 .meta {
   min-width: 0;
   flex: 1;
+}
+
+/* 媒体按钮组：位置由 inline order/margin 决定，这里只管不被压缩 */
+.media-slot {
+  flex: none;
+}
+
+/* hover 模式：鼠标不在词板上时控件淡出。
+   锁定时本来就不显形，所以这条只在解锁态有实际效果。 */
+.content.media-hover .media-slot,
+.content.media-hover .mprogress {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.board.revealed .content.media-hover .media-slot,
+.board.revealed .content.media-hover .mprogress {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .title {

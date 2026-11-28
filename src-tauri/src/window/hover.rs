@@ -4,7 +4,10 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
-use super::{effects, now_ms, GLASS_ALWAYS, GLASS_COLOR, LOCKED, PARKED, PEEK_UNTIL, REVEALED};
+use super::{
+    effects, now_ms, GLASS_ALWAYS, GLASS_COLOR, LOCKED, MEDIA_CLICKABLE, PARKED, PEEK_UNTIL,
+    REVEALED,
+};
 
 /// 16ms ≈ 60Hz。鼠标穿透时 WebView 收不到 mousemove，只能读全局光标。
 const TICK_MS: u64 = 16;
@@ -55,15 +58,19 @@ pub fn spawn(app: AppHandle, win: WebviewWindow) {
 
             let always = GLASS_ALWAYS.load(Ordering::Relaxed);
             let current = REVEALED.load(Ordering::Relaxed);
+            let locked_now = LOCKED.load(Ordering::Relaxed);
+            // 锁定 + 媒体控件可点：窗口不能整体穿透（那样 WM_NCHITTEST 收不到），
+            // 改成由窗口过程按控件矩形放行，其余区域返回 HTTRANSPARENT。
+            let media_click = locked_now && MEDIA_CLICKABLE.load(Ordering::Relaxed);
             // 同理，tao 的整份重写也会把 WS_EX_TRANSPARENT | WS_EX_LAYERED 抹掉。
             // 那两位是"静止态隐形 + 穿透点击"的全部实现 —— 启动即锁定时正好
             // 撞上前端 show()，词板就显了形还挡点击；而 REVEALED 从头到尾都是
             // false，等不到一次状态切换去补救。所以这里每拍对齐一次：
             // 与目标状态一致时是两次 GetWindowLongW，不一致才写。
             // 「背景常显」开着时穿透但保留可见（alpha 255），否则维持老样子（隐形）。
-            effects::set_passthrough(&win, !current, current || always);
+            effects::set_passthrough(&win, !current && !media_click, current || always);
 
-            let locked = LOCKED.load(Ordering::Relaxed);
+            let locked = locked_now;
 
             if locked {
                 leave_ticks = 0;
@@ -128,13 +135,17 @@ fn reveal(win: &WebviewWindow, on: bool) {
     if on {
         effects::enable_glass(win, GLASS_COLOR.load(Ordering::Relaxed));
         effects::set_click_through(win, false);
-    } else if GLASS_ALWAYS.load(Ordering::Relaxed) {
-        // 背景常显：留玻璃 + 可见，但点不到
-        effects::enable_glass(win, GLASS_COLOR.load(Ordering::Relaxed));
-        effects::set_passthrough(win, true, true);
     } else {
-        effects::disable_glass(win);
-        effects::set_click_through(win, true);
+        let always = GLASS_ALWAYS.load(Ordering::Relaxed);
+        let media_click =
+            LOCKED.load(Ordering::Relaxed) && MEDIA_CLICKABLE.load(Ordering::Relaxed);
+        if always {
+            // 背景常显：留玻璃 + 可见，但点不到
+            effects::enable_glass(win, GLASS_COLOR.load(Ordering::Relaxed));
+        } else {
+            effects::disable_glass(win);
+        }
+        effects::set_passthrough(win, !media_click, always);
     }
     // 刚切过状态，顺手确认一次样式（tao 的其它调用也可能把标题栏塞回来）
     effects::strip_caption(win);

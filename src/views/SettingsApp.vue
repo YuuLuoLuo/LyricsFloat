@@ -466,6 +466,25 @@ function toggleGlassAlways(v: boolean): void {
   void setGlassAlways(v)
 }
 
+/** 打开媒体控件时顺手把"文本居中"挪开：控件要贴在文本另一侧，居中没位置 */
+function toggleMedia(v: boolean): void {
+  settings.media.show = v
+  if (!v) {
+    // 关掉控件就别再按"锁定时可点"处理 —— 那会让窗口突然不穿透
+    settings.media.lockedClickable = false
+  } else if (settings.info.text === 'center') {
+    settings.info.text = 'left'
+  }
+  saveSettings()
+}
+
+function setMediaMode(m: 'always' | 'hover'): void {
+  settings.media.mode = m
+  // 悬停模式下锁定时控件不显形，留着"可点"只会多一块看不见的热区
+  if (m === 'hover') settings.media.lockedClickable = false
+  saveSettings()
+}
+
 async function doExportLog(): Promise<void> {
   if (!isTauri) {
     say('浏览器预览里没有日志')
@@ -1154,6 +1173,7 @@ onBeforeUnmount(() => {
                   </button>
                   <button
                     :class="{ on: settings.info.text === 'center' }"
+                    :disabled="settings.media.show"
                     @click="settings.info.text = 'center'"
                   >
                     中
@@ -1173,6 +1193,73 @@ onBeforeUnmount(() => {
                 </div>
                 <span class="val"></span>
               </div>
+              <p v-if="settings.media.show" class="hint">开启媒体控件后文本不能居中：控件要放在文本的另一侧。</p>
+
+              <h3>媒体控件</h3>
+              <div class="swrow single">
+                <label class="switch">
+                  <span>显示媒体控件</span>
+                  <input
+                    type="checkbox"
+                    :checked="settings.media.show"
+                    @change="toggleMedia(($event.target as HTMLInputElement).checked)"
+                  />
+                  <i></i>
+                </label>
+              </div>
+              <template v-if="settings.media.show">
+                <div class="row">
+                  <span class="lbl">进度条位置</span>
+                  <div class="seg grow">
+                    <button
+                      :class="{ on: settings.media.bar === 'top' }"
+                      @click="settings.media.bar = 'top'"
+                    >
+                      顶部
+                    </button>
+                    <button
+                      :class="{ on: settings.media.bar === 'bottom' }"
+                      @click="settings.media.bar = 'bottom'"
+                    >
+                      底部
+                    </button>
+                  </div>
+                  <span class="val"></span>
+                </div>
+                <div class="row">
+                  <span class="lbl">显示时机</span>
+                  <div class="seg grow">
+                    <button
+                      :class="{ on: settings.media.mode === 'always' }"
+                      @click="setMediaMode('always')"
+                    >
+                      一直显示
+                    </button>
+                    <button
+                      :class="{ on: settings.media.mode === 'hover' }"
+                      @click="setMediaMode('hover')"
+                    >
+                      悬停时显示
+                    </button>
+                  </div>
+                  <span class="val"></span>
+                </div>
+                <div class="swrow single">
+                  <label class="switch" :class="{ dis: settings.media.mode === 'hover' }">
+                    <span>锁定时可点击</span>
+                    <input
+                      type="checkbox"
+                      :checked="settings.media.lockedClickable"
+                      :disabled="settings.media.mode === 'hover'"
+                      @change="settings.media.lockedClickable = ($event.target as HTMLInputElement).checked"
+                    />
+                    <i></i>
+                  </label>
+                </div>
+                <p v-if="settings.media.mode === 'hover'" class="hint">
+                  悬停模式锁定后控件不显示，所以这项只在「一直显示」时可选。
+                </p>
+              </template>
             </template>
 
             <h3>词板尺寸</h3>
@@ -2101,11 +2188,21 @@ section > h3:first-child {
   cursor: pointer;
 }
 
+/* 被媒体控件禁用的项（文本居中）和锁定时可点（悬停模式下不适用） */
+.seg button:disabled {
+  opacity: 0.38;
+  cursor: default;
+  pointer-events: none;
+}
+
+.switch.dis {
+  opacity: 0.45;
+}
+
 .seg button.on {
   background: rgba(127, 212, 255, 0.16);
   border-color: rgba(127, 212, 255, 0.48);
-  color: #a6e3ff;
-}
+  color: #a6e3ff;}
 
 /* 系统取色器：input 放在窗口外的一角，点击由色块按钮用 click() 触发，
    这样聚焦时不会把整页滚动过去 */

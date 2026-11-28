@@ -392,6 +392,93 @@ pub struct PlayerInfo {
     pub playing: bool,
 }
 
+// ---------------------------------------------------------------- 媒体控制
+
+/// 在命令线程上调用 SMTC 前先把 COM 初始化一次。
+/// 播放线程初始化过，但 Tauri 的命令跑在别的线程，不初始化就拿不到接口。
+#[cfg(windows)]
+fn with_session<F>(f: F) -> bool
+where
+    F: FnOnce(&windows::Media::Control::GlobalSystemMediaTransportControlsSession) -> bool,
+{
+    use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+    }
+    let Some(mgr) = manager() else { return false };
+    let Ok(session) = mgr.GetCurrentSession() else {
+        return false;
+    };
+    f(&session)
+}
+
+/// 播放 / 暂停切换
+#[tauri::command]
+pub fn media_toggle() -> bool {
+    #[cfg(windows)]
+    {
+        with_session(|s| {
+            s.TryTogglePlayPauseAsync()
+                .and_then(|op| op.get())
+                .unwrap_or(false)
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+#[tauri::command]
+pub fn media_next() -> bool {
+    #[cfg(windows)]
+    {
+        with_session(|s| {
+            s.TrySkipNextAsync()
+                .and_then(|op| op.get())
+                .unwrap_or(false)
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+#[tauri::command]
+pub fn media_prev() -> bool {
+    #[cfg(windows)]
+    {
+        with_session(|s| {
+            s.TrySkipPreviousAsync()
+                .and_then(|op| op.get())
+                .unwrap_or(false)
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// 跳转到指定进度（秒）。SMTC 要的是 100ns 单位的 tick。
+#[tauri::command]
+pub fn media_seek(position: f64) -> bool {
+    #[cfg(windows)]
+    {
+        let ticks = (position.max(0.0) * 10_000_000.0).round() as i64;
+        with_session(|s| {
+            s.TryChangePlaybackPositionAsync(ticks)
+                .and_then(|op| op.get())
+                .unwrap_or(false)
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
 #[tauri::command]
 pub fn list_players() -> Vec<PlayerInfo> {
     #[cfg(windows)]
