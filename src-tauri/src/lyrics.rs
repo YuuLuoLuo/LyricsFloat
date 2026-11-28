@@ -75,6 +75,12 @@ pub struct CandidateBoard {
     pub track: String,
     pub prefer: String,
     pub items: Vec<LyricCandidate>,
+    /// 发起这次搜索的时刻（epoch ms）。
+    ///
+    /// 快速连点词源时会有多个请求同时在跑，完成顺序和发起顺序无关。
+    /// 没有这个时间戳，"先发后到"的旧结果会把新结果盖掉 ——
+    /// 用户看到的就是"切过去半天，结果又跳回上一个源的列表"。
+    pub at: u64,
 }
 
 static LAST: Mutex<Option<CandidateBoard>> = Mutex::new(None);
@@ -84,24 +90,63 @@ pub fn last_candidates() -> Option<CandidateBoard> {
     LAST.lock().ok().and_then(|g| g.as_ref().cloned())
 }
 
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// 写入候选清单，带"新旧"判定：更早发起、更晚返回的请求不许覆盖更新的清单。
+fn store_board(board: CandidateBoard, at: u64) {
+    if let Ok(mut g) = LAST.lock() {
+        if let Some(old) = g.as_ref() {
+            if old.track == board.track && old.at > at {
+                return;
+            }
+        }
+        *g = Some(board);
+    }
+}
+
 fn publish_candidates(
     title: &str,
     artist: &str,
     prefer: &str,
     items: &[LyricCandidate],
     chosen: Option<usize>,
+    at: u64,
 ) {
+    let track = track_key(title, artist);
+
+    // 空结果不许盖掉已经有的清单。
+    //
+    // 快速连点词源时会有好几个请求同时在跑，某个源恰好这会儿网络抽风返回空，
+    // 一旦覆盖，用户看到的就是"刚还有一堆，切一下就全没了"。宁可留着上一份
+    // （至少能点选），也不要闪成一片空白。
+    if items.is_empty() {
+        if let Ok(g) = LAST.lock() {
+            if let Some(old) = g.as_ref() {
+                if old.track == track && !old.items.is_empty() && old.at >= at {
+                    return;
+                }
+            }
+        }
+    }
+
     let mut list = items.to_vec();
     for (i, c) in list.iter_mut().enumerate() {
         c.chosen = chosen == Some(i);
     }
-    if let Ok(mut g) = LAST.lock() {
-        *g = Some(CandidateBoard {
-            track: track_key(title, artist),
+    store_board(
+        CandidateBoard {
+            track,
             prefer: prefer.to_string(),
             items: list,
-        });
-    }
+            at,
+        },
+        at,
+    );
 }
 
 /// 前端也用这个拼串来核对"这份候选是不是当前这首"
@@ -139,29 +184,59 @@ fn fetch_sync(
     prefer: &str,
     pick: &str,
 ) -> Option<LyricResult> {
+    // 发起时刻。回来得晚不代表更新的选择，竞态判定用它而不是完成时刻。
+    let started = now_ms();
     let key = cache_key(title, artist, prefer, pick);
     if let Some(hit) = read_cache(&key) {
         crate::logbuf::info(&format!(
             "歌词命中缓存：{title} - {artist}（{} → {} / {}）",
             hit.source, hit.matched_title, hit.matched_artist
         ));
-        // 缓存里没有候选清单，补一份单条的把板块撑起来
-        publish_candidates(
-            title,
-            artist,
-            prefer,
-            &[LyricCandidate {
-                source: hit.source.clone(),
-                source_id: hit.source_id.clone(),
-                title: hit.matched_title.clone(),
-                artist: hit.matched_artist.clone(),
-                duration,
-                synced: true,
-                score: 0.0,
-                chosen: false,
-            }],
-            Some(0),
-        );
+        // 缓存里只有一条结果，但板块要的是"这次搜到了哪些"。
+        //
+        // 之前这里无条件 publish 单条，于是在两个源之间快速来回切的时候，
+        // 谁命中缓存谁就把整份清单压成一条 —— 用户看到的就是"自动时一堆，
+        // 切一下只剩一条"。这里改成：同曲已有完整清单就留着，只把选中标到
+        // 缓存那条上；实在没有清单才发单条垫底。
+        let track = track_key(title, artist);
+        let keep = LAST
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().cloned())
+            .filter(|b| b.track == track && b.items.len() > 1);
+
+        match keep {
+            Some(mut b) => {
+                b.prefer = prefer.to_string();
+                for c in b.items.iter_mut() {
+                    c.chosen = c.source_id == hit.source_id
+                        && c.title == hit.matched_title
+                        && c.artist == hit.matched_artist;
+                }
+                if let Ok(mut g) = LAST.lock() {
+                    *g = Some(b);
+                }
+            }
+            None => publish_candidates(
+                title,
+                artist,
+                prefer,
+                &[LyricCandidate {
+                    source: hit.source.clone(),
+                    source_id: hit.source_id.clone(),
+                    title: hit.matched_title.clone(),
+                    artist: hit.matched_artist.clone(),
+                    duration,
+                    synced: true,
+                    score: 0.0,
+                    chosen: false,
+                }],
+                Some(0),
+                // 单条垫底清单给最低优先级：任何真正的搜索结果都能顶掉它，
+                // 免得"命中缓存"这一下把正在跑的完整列表挡在外面。
+                0,
+            ),
+        }
         return Some(hit);
     }
 
@@ -171,7 +246,7 @@ fn fetch_sync(
     // 用户手动点过某一条：只用它。这一条取不到就当没有 ——
     // 悄悄退回打分最优会让人以为"点了没生效"。
     if !pick.is_empty() {
-        publish_candidates(title, artist, prefer, &cands, None);
+        publish_candidates(title, artist, prefer, &cands, None, started);
         let idx = cands.iter().position(|c| candidate_id(c) == pick)?;
         match take_lyric(&handles[idx]) {
             Some(r) => {
@@ -183,7 +258,7 @@ fn fetch_sync(
                     t0.elapsed().as_millis()
                 ));
                 write_cache(&key, &r);
-                publish_candidates(title, artist, prefer, &cands, Some(idx));
+                publish_candidates(title, artist, prefer, &cands, Some(idx), started);
                 Some(r)
             }
             None => {
@@ -192,8 +267,8 @@ fn fetch_sync(
             }
         }
     } else {
-        publish_candidates(title, artist, prefer, &cands, None);
-        pick_best(title, artist, duration, prefer, &key, t0, cands, handles)
+        publish_candidates(title, artist, prefer, &cands, None, started);
+        pick_best(title, artist, duration, prefer, &key, t0, started, cands, handles)
     }
 }
 
@@ -205,6 +280,7 @@ fn pick_best(
     prefer: &str,
     key: &str,
     t0: Instant,
+    started: u64,
     cands: Vec<LyricCandidate>,
     handles: Vec<Handle>,
 ) -> Option<LyricResult> {
@@ -231,7 +307,7 @@ fn pick_best(
                 t0.elapsed().as_millis()
             ));
             write_cache(key, &r);
-            publish_candidates(title, artist, prefer, &cands, Some(idx));
+            publish_candidates(title, artist, prefer, &cands, Some(idx), started);
             return Some(r);
         }
         crate::logbuf::warn(&format!(

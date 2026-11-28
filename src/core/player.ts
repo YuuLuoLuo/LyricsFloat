@@ -117,10 +117,14 @@ async function loadLyric(np: NowPlaying): Promise<void> {
     if (token !== loadToken) return
 
     if (!payload) {
-      raw = null
-      runtime.doc = null
-      runtime.source = ''
-      runtime.sourceId = ''
+      // 同一首歌换源失败时不要把已经在放的歌词清掉 ——
+      // 快速来回切词源，只要有一个源没结果就整块空白，比"暂时沿用旧歌词"糟得多。
+      if (!soft) {
+        raw = null
+        runtime.doc = null
+        runtime.source = ''
+        runtime.sourceId = ''
+      }
       // 手动指定了词源时把话说清楚：不是"没有歌词"，是这个源没有
       runtime.notice = prefer
         ? '当前词源无可用歌词'
