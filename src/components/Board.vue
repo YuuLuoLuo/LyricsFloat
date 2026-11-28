@@ -235,16 +235,22 @@ function clearPauseTimer(): void {
   }
 }
 
+/**
+ * 暂停隐藏的重置规则：
+ * - 非锁定：鼠标移到词板上（revealed）就算"在看"，立刻放出来；离开后重新计时
+ * - 锁定：revealed 永远是 false，所以只有重新播放才会放出来
+ */
 watch(
   () => [
     runtime.playing,
+    revealed.value,
     settings.behavior.hideOnPause,
     settings.behavior.pauseDelaySec,
     !!stageDoc.value,
   ] as const,
-  ([playing, on, sec, hasDoc]) => {
+  ([playing, revealNow, on, sec, hasDoc]) => {
     clearPauseTimer()
-    if (!on || playing || !hasDoc) {
+    if (!on || playing || !hasDoc || (revealNow && !runtime.locked)) {
       pausedHidden.value = false
       return
     }
@@ -256,8 +262,8 @@ watch(
   { immediate: true },
 )
 
-/** 鼠标悬停时一律不藏 —— 否则用户想看还得先去设置里关掉这个功能 */
-const pausedLyricsHidden = computed(() => pausedHidden.value && !runtime.revealed)
+/** 锁定时不看鼠标（revealed 恒假），所以这里不再跟着 revealed 收起 */
+const pausedLyricsHidden = computed(() => pausedHidden.value)
 
 /* ------------------------------------------------------------ 歌词信息 */
 

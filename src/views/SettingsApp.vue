@@ -351,9 +351,8 @@ const PRESETS = {
     colorOther: '#cfcfc8',
     colorHighlight: '#7fd4ff',
     strokeColor: '#0a0a0c',
-    // 白字默认不描边：白字 + 深描边在深色壁纸上会显得字更细。
-    // 需要时可以自己往上拉，描边是画在字形外面的，一定看得见。
-    strokeWidth: 0,
+    // 白字只留一圈细描边：够把字从浅色壁纸上拎出来，又不显得字变粗
+    strokeWidth: 1.0,
     shadowColor: '#000000',
     shadow: 0.6,
   },
@@ -361,9 +360,9 @@ const PRESETS = {
     colorCurrent: '#131317',
     colorOther: '#3a3a44',
     colorHighlight: '#1b5cff',
-    // 黑字必须配白描边，否则深色壁纸上几乎不可读
+    // 黑字必须配白描边，否则深色壁纸上几乎不可读；1.0 会糊成一团，0.8 刚好
     strokeColor: '#ffffff',
-    strokeWidth: 2.4,
+    strokeWidth: 0.8,
     shadowColor: '#ffffff',
     shadow: 0.28,
   },
@@ -383,40 +382,12 @@ function applyPreset(key: PresetKey): void {
 /* ------------------------------------------------------------- 取色器 */
 
 /**
- * 系统取色器由一个藏在窗口角落的 input 触发。
- * 以前把 input 绝对定位在色块里，聚焦时浏览器会把整页滚动过去，
- * 结果就是"打开调色板后设置页错位"。
+ * 颜色直接交给原生的 `<input type="color">`（色块就是输入框本身）。
+ *
+ * 以前用"藏在角落的 input + 按钮 click() 触发"，在 WebView2 里点不出来 ——
+ * 隐藏的 color input 拿不到用户手势，系统调色板根本不弹。现在色块自己就是
+ * input，点它等于点原生控件，反而更稳。
  */
-const palette = ref<HTMLInputElement | null>(null)
-type ColorKey =
-  | 'colorCurrent'
-  | 'colorOther'
-  | 'colorHighlight'
-  | 'strokeColor'
-  | 'shadowColor'
-  | 'infoColor'
-  | 'tint'
-let paletteKey: ColorKey = 'colorCurrent'
-
-function pickColor(key: ColorKey): void {
-  paletteKey = key
-  const el = palette.value
-  if (!el) return
-  el.value =
-    key === 'tint'
-      ? settings.glass.tint
-      : key === 'infoColor'
-        ? settings.info.color
-        : settings.appearance[key]
-  el.click()
-}
-
-function onPaletteInput(e: Event): void {
-  const v = (e.target as HTMLInputElement).value
-  if (paletteKey === 'tint') settings.glass.tint = v
-  else if (paletteKey === 'infoColor') settings.info.color = v
-  else settings.appearance[paletteKey] = v
-}
 
 async function toggleAutostart(v: boolean) {
   settings.behavior.autostart = v
@@ -507,19 +478,16 @@ function toggleGlassAlways(v: boolean): void {
 /** 打开媒体控件时顺手把"文本居中"挪开：控件要贴在文本另一侧，居中没位置 */
 function toggleMedia(v: boolean): void {
   settings.media.show = v
-  if (!v) {
-    // 关掉控件就别再按"锁定时可点"处理 —— 那会让窗口突然不穿透
-    settings.media.lockedClickable = false
-  } else if (settings.info.text === 'center') {
+  if (v && settings.info.text === 'center') {
     settings.info.text = 'left'
   }
   saveSettings()
 }
 
 function setMediaMode(m: 'always' | 'hover'): void {
+  // 切模式不动「锁定时可点击」的开关状态：悬停模式下它只是不生效，
+  // 切回「一直显示」时用户之前的选择还在
   settings.media.mode = m
-  // 悬停模式下锁定时控件不显形，留着"可点"只会多一块看不见的热区
-  if (m === 'hover') settings.media.lockedClickable = false
   saveSettings()
 }
 
@@ -537,11 +505,31 @@ function togglePart(k: 'prev' | 'toggle' | 'next' | 'bar'): void {
   saveSettings()
 }
 
-/** 暂停自动隐藏的延迟：手填，收敛到 1 秒 ~ 1 小时 */
+/**
+ * 隐藏延迟：输入框自己存草稿。
+ *
+ * 直接绑 settings 会被"跨窗口同步"拽回去 —— 900ms 一次的 pullSettings 拿
+ * localStorage 里的旧值覆盖内存，输入到一半就被打回原数字。草稿只在自己
+ * 失焦/回车（change）时才写进 settings，并立刻落盘。
+ */
+const delayDraft = ref(String(settings.behavior.pauseDelaySec))
+
+watch(
+  () => settings.behavior.pauseDelaySec,
+  (v) => {
+    if (String(v) !== delayDraft.value) delayDraft.value = String(v)
+  },
+)
+
+/** 手填，收敛到 1 秒 ~ 1 小时 */
 function onPauseDelayInput(e: Event): void {
   const raw = Number((e.target as HTMLInputElement).value)
-  const v = Number.isFinite(raw) ? Math.min(3600, Math.max(1, Math.round(raw))) : 60
+  const ok = Number.isFinite(raw) && raw > 0
+  const v = ok ? Math.min(3600, Math.max(1, Math.round(raw))) : settings.behavior.pauseDelaySec
   settings.behavior.pauseDelaySec = v
+  delayDraft.value = String(v)
+  ;(e.target as HTMLInputElement).value = String(v)
+  saveSettings()
 }
 
 async function doExportLog(): Promise<void> {
@@ -874,7 +862,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="win">
-    <input ref="palette" class="palette" type="color" @input="onPaletteInput" />
     <header class="titlebar" @pointerdown="onTitleDown" @dblclick="minimizeSelf">
       <div class="brand">
         <img src="/icon.svg" alt="" class="logo" />
@@ -985,7 +972,7 @@ onBeforeUnmount(() => {
                 <i></i>
               </label>
               <label class="switch" :class="{ dis: !settings.behavior.hideOnPause }">
-                <span>连信息与控件一起隐藏</span>
+                <span>同时隐藏歌词信息与控件</span>
                 <input
                   type="checkbox"
                   :checked="settings.behavior.hideMediaOnPause"
@@ -1002,13 +989,14 @@ onBeforeUnmount(() => {
                 type="number"
                 min="1"
                 max="3600"
-                :value="settings.behavior.pauseDelaySec"
+                :value="delayDraft"
+                @input="delayDraft = ($event.target as HTMLInputElement).value"
                 @change="onPauseDelayInput"
               />
               <span class="val">秒</span>
             </div>
             <p v-if="settings.behavior.hideOnPause" class="hint">
-              暂停超过这个时间就先把歌词收起来，鼠标移到词板上会重新显示。
+              暂停超过这个时间就先把歌词收起来。解锁时鼠标移到词板上会重新显示，锁定后要等重新播放。
             </p>
             <div class="row">
               <span class="lbl">词板位置</span>
@@ -1300,10 +1288,14 @@ onBeforeUnmount(() => {
               </div>
               <div class="row">
                 <span class="lbl">文字颜色</span>
-                <button type="button" class="color" @click="pickColor('infoColor')">
-                  <span :style="{ background: settings.info.color }"></span>
+                <label class="color">
+                  <input
+                    type="color"
+                    :value="settings.info.color"
+                    @input="settings.info.color = ($event.target as HTMLInputElement).value"
+                  />
                   <em>{{ settings.info.color }}</em>
-                </button>
+                </label>
                 <span class="val"></span>
               </div>
               <div class="row">
@@ -1428,7 +1420,7 @@ onBeforeUnmount(() => {
                   </label>
                 </div>
                 <p v-if="settings.media.mode === 'hover'" class="hint">
-                  悬停模式锁定后控件不显示，所以这项只在「一直显示」时可选。
+                  悬停模式下锁定时控件不显形，这项暂不生效；切回「一直显示」时保留当前选择。
                 </p>
                 <div class="swrow">
                   <label class="switch">
@@ -1590,26 +1582,38 @@ onBeforeUnmount(() => {
             </div>
             <div class="row">
               <span class="lbl">当前行</span>
-              <button type="button" class="color" @click="pickColor('colorCurrent')">
-                <span :style="{ background: settings.appearance.colorCurrent }"></span>
+              <label class="color">
+                <input
+                  type="color"
+                  :value="settings.appearance.colorCurrent"
+                  @input="settings.appearance.colorCurrent = ($event.target as HTMLInputElement).value"
+                />
                 <em>{{ settings.appearance.colorCurrent }}</em>
-              </button>
+              </label>
               <span class="val"></span>
             </div>
             <div class="row">
               <span class="lbl">其余行</span>
-              <button type="button" class="color" @click="pickColor('colorOther')">
-                <span :style="{ background: settings.appearance.colorOther }"></span>
+              <label class="color">
+                <input
+                  type="color"
+                  :value="settings.appearance.colorOther"
+                  @input="settings.appearance.colorOther = ($event.target as HTMLInputElement).value"
+                />
                 <em>{{ settings.appearance.colorOther }}</em>
-              </button>
+              </label>
               <span class="val"></span>
             </div>
             <div v-if="show.ktvColor" class="row">
               <span class="lbl">逐字高亮</span>
-              <button type="button" class="color" @click="pickColor('colorHighlight')">
-                <span :style="{ background: settings.appearance.colorHighlight }"></span>
+              <label class="color">
+                <input
+                  type="color"
+                  :value="settings.appearance.colorHighlight"
+                  @input="settings.appearance.colorHighlight = ($event.target as HTMLInputElement).value"
+                />
                 <em>{{ settings.appearance.colorHighlight }}</em>
-              </button>
+              </label>
               <span class="val"></span>
             </div>
 
@@ -1628,10 +1632,14 @@ onBeforeUnmount(() => {
             </div>
             <div class="row">
               <span class="lbl">描边颜色</span>
-              <button type="button" class="color" @click="pickColor('strokeColor')">
-                <span :style="{ background: settings.appearance.strokeColor }"></span>
+              <label class="color">
+                <input
+                  type="color"
+                  :value="settings.appearance.strokeColor"
+                  @input="settings.appearance.strokeColor = ($event.target as HTMLInputElement).value"
+                />
                 <em>{{ settings.appearance.strokeColor }}</em>
-              </button>
+              </label>
               <span class="val"></span>
             </div>
             <div class="row">
@@ -1648,10 +1656,14 @@ onBeforeUnmount(() => {
             </div>
             <div class="row">
               <span class="lbl">阴影颜色</span>
-              <button type="button" class="color" @click="pickColor('shadowColor')">
-                <span :style="{ background: settings.appearance.shadowColor }"></span>
+              <label class="color">
+                <input
+                  type="color"
+                  :value="settings.appearance.shadowColor"
+                  @input="settings.appearance.shadowColor = ($event.target as HTMLInputElement).value"
+                />
                 <em>{{ settings.appearance.shadowColor }}</em>
-              </button>
+              </label>
               <span class="val"></span>
             </div>
 
@@ -1734,15 +1746,15 @@ onBeforeUnmount(() => {
             </div>
             <div class="row">
               <span class="lbl">背景颜色</span>
-              <button
-                type="button"
-                class="color"
-                :disabled="settings.glass.autoColor"
-                @click="pickColor('tint')"
-              >
-                <span :style="{ background: autoTint }"></span>
+              <label class="color" :class="{ off: settings.glass.autoColor }">
+                <input
+                  type="color"
+                  :value="settings.glass.tint"
+                  :disabled="settings.glass.autoColor"
+                  @input="settings.glass.tint = ($event.target as HTMLInputElement).value"
+                />
                 <em>{{ autoTint }}</em>
-              </button>
+              </label>
               <span class="val"></span>
             </div>
             </div>
@@ -2252,7 +2264,7 @@ section > h3:first-child {
   font-family: inherit;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  text-align: right;
+  text-align: center;
   outline: none;
 }
 
@@ -2454,19 +2466,6 @@ section > h3:first-child {
   border-color: rgba(127, 212, 255, 0.48);
   color: #a6e3ff;}
 
-/* 系统取色器：input 放在窗口外的一角，点击由色块按钮用 click() 触发，
-   这样聚焦时不会把整页滚动过去 */
-.palette {
-  position: fixed;
-  left: 0;
-  top: 0;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-  z-index: -1;
-}
-
 .paper-empty {
   position: absolute;
   inset: 0;
@@ -2480,26 +2479,35 @@ section > h3:first-child {
   font-variant-numeric: tabular-nums;
 }
 
+/* 色块本身就是原生 color input：点它直接弹系统调色板 */
 .color {
   display: inline-flex;
   align-items: center;
   gap: 9px;
   cursor: pointer;
   flex: 1;
-  padding: 0;
-  border: none;
-  background: none;
-  font-family: inherit;
-  color: inherit;
-  text-align: left;
+  min-width: 0;
 }
 
-.color span {
+.color input[type='color'] {
   width: 22px;
   height: 22px;
-  border-radius: 6px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
   flex: none;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+}
+
+.color input[type='color']::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color input[type='color']::-webkit-color-swatch {
+  border: none;
+  border-radius: 6px;
 }
 
 .color em {
@@ -2510,7 +2518,7 @@ section > h3:first-child {
 }
 
 /* 「从封面取色」开着时颜色由封面色决定，调色板没有意义 */
-.color:disabled {
+.color.off {
   opacity: 0.45;
   cursor: default;
   pointer-events: none;
