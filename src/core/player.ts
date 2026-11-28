@@ -33,6 +33,33 @@ let loadedPrefer = ''
 /** 上一次取词用的「用户手动挑的候选」，切源/换曲/重点候选都靠它触发重取 */
 let loadedPick = ''
 
+/**
+ * 搜索锁。
+ *
+ * 切源后到结果回来这段时间里把设置页的词源按钮锁住 —— 连点时几个请求同时跑，
+ * 谁先回来谁覆盖，用户会看到"切过去那次根本没搜"。超时兜底放在 15 秒：
+ * 网络卡住时不能让按钮一直点不动。
+ */
+const SEARCH_TIMEOUT_MS = 15_000
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+function beginSearch(): void {
+  runtime.searching = true
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    searchTimer = null
+    runtime.searching = false
+  }, SEARCH_TIMEOUT_MS)
+}
+
+function endSearch(): void {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+  runtime.searching = false
+}
+
 function buildDoc(): LyricDoc | null {
   if (!raw) return null
   const useYrc = raw.yrc.trim().length > 0
@@ -113,6 +140,7 @@ async function loadLyric(np: NowPlaying): Promise<void> {
   }
 
   try {
+    beginSearch()
     const payload = await fetchLyric(np.title, np.artist, np.duration, prefer, pick)
     if (token !== loadToken) return
 
@@ -143,7 +171,11 @@ async function loadLyric(np: NowPlaying): Promise<void> {
       `歌词已装载：${np.title}（${payload.source}，${runtime.doc?.lines.length ?? 0} 行）`,
     )
   } finally {
-    if (token === loadToken) runtime.loading = false
+    // 只有"最新那次"才能解锁：旧的请求结束不该把新搜索的锁打开
+    if (token === loadToken) {
+      runtime.loading = false
+      endSearch()
+    }
   }
 }
 

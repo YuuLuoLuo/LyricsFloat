@@ -124,10 +124,13 @@ fn publish_candidates(
     // 快速连点词源时会有好几个请求同时在跑，某个源恰好这会儿网络抽风返回空，
     // 一旦覆盖，用户看到的就是"刚还有一堆，切一下就全没了"。宁可留着上一份
     // （至少能点选），也不要闪成一片空白。
+    //
+    // 注意这里**不看新旧**：空结果再新也没内容可看，留着旧的永远更好。
+    // 换歌时 track 不同，照样会正常换成新歌的清单。
     if items.is_empty() {
         if let Ok(g) = LAST.lock() {
             if let Some(old) = g.as_ref() {
-                if old.track == track && !old.items.is_empty() && old.at >= at {
+                if old.track == track && !old.items.is_empty() {
                     return;
                 }
             }
