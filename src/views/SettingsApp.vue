@@ -1043,8 +1043,11 @@ onBeforeUnmount(() => {
                 {{ s.name }}
               </button>
             </div>
-            <p v-if="settings.lyric.source && !runtime.loading && !runtime.doc" class="hint">
-              当前词源无可用歌词
+            <p
+              v-if="settings.lyric.source && runtime.trackTitle && !runtime.loading && (!runtime.doc || runtime.notice)"
+              class="hint"
+            >
+              {{ runtime.notice || '当前词源无可用歌词' }}
             </p>
 
             <div v-if="candList.length" class="candbox">
@@ -1066,7 +1069,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <p v-else class="hint">还没有搜索结果。</p>
-            <p v-if="candList.length" class="hint">点一条就用那份歌词，再点一次取消。</p>
+            <p v-if="candList.length" class="hint">若歌词匹配错误，可手动选择搜索到的歌词。</p>
             <p v-if="lyricSource" class="hint">
               歌词来自第三方曲库，可能存在错字、缺句或时间轴偏差；整体快了慢了可用下方「时间偏移」微调。
             </p>
@@ -1258,6 +1261,29 @@ onBeforeUnmount(() => {
                 </div>
                 <p v-if="settings.media.mode === 'hover'" class="hint">
                   悬停模式锁定后控件不显示，所以这项只在「一直显示」时可选。
+                </p>
+                <div class="swrow">
+                  <label class="switch">
+                    <span>控件底色跟随取色</span>
+                    <input
+                      type="checkbox"
+                      :checked="settings.media.tint"
+                      @change="settings.media.tint = ($event.target as HTMLInputElement).checked"
+                    />
+                    <i></i>
+                  </label>
+                  <label class="switch">
+                    <span>进度条跟随取色</span>
+                    <input
+                      type="checkbox"
+                      :checked="settings.media.barTint"
+                      @change="settings.media.barTint = ($event.target as HTMLInputElement).checked"
+                    />
+                    <i></i>
+                  </label>
+                </div>
+                <p class="hint">
+                  取色会自动与背景拉开明暗差。进度条不取色时为白色，不可手动更改。
                 </p>
               </template>
             </template>
