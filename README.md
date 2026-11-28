@@ -68,8 +68,8 @@
 
 LyricsFloat 读的是 Windows 系统媒体控件（SMTC），也就是按媒体键时任务栏弹出的「正在播放」。
 
-- **直接可用**：网易云音乐、QQ 音乐、酷狗音乐、Spotify、Apple Music（Windows 版）等。
-  网易云音乐只有高版本原生支持 SMTC，低版本需要第三方插件才能上报。
+- **直接可用**：网易云音乐、QQ 音乐、酷狗音乐、Spotify、Apple Music（Windows 版）等。  
+  **网易云音乐只有高版本原生支持 SMTC，低版本需要第三方插件才能上报。**
 - **需要打开媒体键 / 系统集成**：PotPlayer、AIMP、JRiver。
 - **网页播放**：Chrome 或 Edge 里播 YouTube、Bilibili、网易云网页版也会上报。
 - **读不到**：播放器没有实现 SMTC，或被系统关掉了媒体键支持。
