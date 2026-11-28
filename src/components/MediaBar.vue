@@ -8,6 +8,9 @@
 import { runtime } from '../core/store'
 import { mediaNext, mediaPrev, mediaToggle } from '../core/bridge'
 
+/** 按钮底色。由 Board.vue 算好传进来（默认暗色，或跟随封面取色） */
+defineProps<{ bg: string }>()
+
 function prev(): void {
   void mediaPrev()
 }
@@ -22,7 +25,7 @@ function next(): void {
 </script>
 
 <template>
-  <div class="media-bar">
+  <div class="media-bar" :style="{ '--mbtn-bg': bg }">
     <button class="mbtn" title="上一曲" @click.stop="prev">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M7 6v12" />
@@ -70,21 +73,22 @@ function next(): void {
   padding: 0;
   border: none;
   border-radius: 6px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.72);
+  background: var(--mbtn-bg, rgba(0, 0, 0, 0.3));
+  color: rgba(255, 255, 255, 0.78);
   cursor: pointer;
   transition:
-    background 120ms ease,
+    filter 120ms ease,
     color 120ms ease;
 }
 
+/* 底色可能是任意取色出来的深色，hover 只能靠提亮而不是叠白 */
 .mbtn:hover {
-  background: rgba(255, 255, 255, 0.13);
+  filter: brightness(1.45);
   color: #fff;
 }
 
 .mbtn:active {
-  background: rgba(255, 255, 255, 0.2);
+  filter: brightness(1.7);
 }
 
 .mbtn svg {
@@ -92,12 +96,13 @@ function next(): void {
   height: 15px;
 }
 
-/* 播放/暂停是主操作，给一个常驻的浅底 */
+/* 播放/暂停是主操作，常态就比左右两个亮一点 */
 .mbtn.play {
-  background: rgba(255, 255, 255, 0.1);
+  filter: brightness(1.22);
+  color: #fff;
 }
 
 .mbtn.play:hover {
-  background: rgba(255, 255, 255, 0.22);
+  filter: brightness(1.6);
 }
 </style>

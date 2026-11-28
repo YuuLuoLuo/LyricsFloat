@@ -76,6 +76,13 @@ export interface AppSettings {
     mode: 'always' | 'hover'
     /** 锁定时控件仍可点（只有「一直显示」时可选） */
     lockedClickable: boolean
+    /**
+     * 控件底色跟随封面取色。关着时是固定的暗色底。
+     * 开着时取封面主色，并自动与词板背景拉开明暗差，避免糊成一片。
+     */
+    tint: boolean
+    /** 进度条跟随封面取色。关着时是白色（主题色，不可手动改） */
+    barTint: boolean
   }
   lyric: {
     offsetMs: number
@@ -126,7 +133,14 @@ export const DEFAULTS: AppSettings = {
   glass: { tint: '#14141a', alpha: 0.42, always: false, autoColor: false },
   behavior: { autostart: false, alwaysOnTop: true, locked: false, hideWhenIdle: false },
   info: { show: false, pos: 'top', cover: 'left', text: 'left' },
-  media: { show: false, bar: 'bottom', mode: 'hover', lockedClickable: false },
+  media: {
+    show: false,
+    bar: 'bottom',
+    mode: 'hover',
+    lockedClickable: false,
+    tint: false,
+    barTint: false,
+  },
   lyric: { offsetMs: 0, player: '', pinPlayer: false, source: '', pick: '' },
 }
 

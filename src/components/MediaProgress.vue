@@ -9,8 +9,31 @@ import { computed, ref } from 'vue'
 import { runtime } from '../core/store'
 import { mediaSeek } from '../core/bridge'
 
+/** 已播放部分的颜色。由 Board.vue 算：默认白色，开启取色时用封面主色 */
+const props = defineProps<{ color: string }>()
+
 const dragging = ref(false)
 const dragRatio = ref(0)
+
+/** 发光用同一颜色的低透明度版本，所以得把 #rrggbb 拆成 r,g,b */
+const fillStyle = computed(() => {
+  const hex = props.color.replace('#', '')
+  const full =
+    hex.length === 3
+      ? hex
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : hex
+  const n = parseInt(full, 16)
+  const rgb = Number.isNaN(n)
+    ? '255, 255, 255'
+    : `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`
+  return {
+    background: props.color,
+    boxShadow: `0 0 7px rgba(${rgb}, 0.6), 0 0 14px rgba(${rgb}, 0.24)`,
+  }
+})
 
 const ratio = computed(() => {
   if (dragging.value) return dragRatio.value
@@ -64,7 +87,7 @@ function onUp(e: PointerEvent): void {
     @pointercancel.stop="onUp"
     @click.stop
   >
-    <div class="fill" :style="{ width: `${ratio * 100}%` }"></div>
+    <div class="fill" :style="{ width: `${ratio * 100}%`, ...fillStyle }"></div>
   </div>
 </template>
 
@@ -94,10 +117,6 @@ function onUp(e: PointerEvent): void {
   left: 0;
   height: 3px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow:
-    0 0 7px rgba(255, 255, 255, 0.6),
-    0 0 14px rgba(255, 255, 255, 0.24);
   pointer-events: none;
   transition: width 140ms linear;
 }

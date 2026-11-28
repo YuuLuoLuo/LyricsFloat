@@ -57,6 +57,70 @@ function hexToRgb(hex: string): string {
   return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`
 }
 
+/** #rgb / #rrggbb -> [r, g, b] */
+function rgbOf(hex: string): [number, number, number] {
+  const h = hex.replace('#', '')
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h
+  const n = parseInt(full, 16)
+  if (Number.isNaN(n)) return [128, 128, 128]
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+
+/** 感知亮度（0~1），够用来判断"两个颜色会不会糊在一起" */
+function luma([r, g, b]: [number, number, number]): number {
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255
+}
+
+function toHex([r, g, b]: [number, number, number]): string {
+  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`
+}
+
+/**
+ * 取色时自动躲开词板背景。
+ *
+ * 深色封面配深色背景、浅色配浅色，控件会"糊在背景里看不见"。这里比一下亮度，
+ * 差得不够就按背景的反方向推（背景暗就提亮，背景亮就压暗）。
+ */
+function standOut(color: string, bg: string, gap = 0.26): [number, number, number] {
+  const fg = rgbOf(color)
+  const bgL = luma(rgbOf(bg))
+  const fgL = luma(fg)
+  if (Math.abs(fgL - bgL) >= gap) return fg
+  const dir = bgL < 0.5 ? 1 : -1
+  const target = Math.min(1, Math.max(0, bgL + dir * gap))
+  const k = fgL > 0.02 ? target / fgL : 1
+  return fg.map((v) => Math.min(255, Math.max(0, Math.round(v * k)))) as [number, number, number]
+}
+
+const mediaStyle = computed(() => {
+  const t = cardText.value
+  const leftSide = t === 'hidden' ? cardCover.value === 'right' : t === 'right'
+  const style: Record<string, string | number> = { order: mediaOrder.value }
+  // 文本显示时由 meta 的 flex:1 把控件顶到另一侧；文本不显示时没有那个撑开的
+  // 元素，得自己用 auto margin 顶过去。
+  if (t === 'hidden' && !leftSide) style.marginLeft = 'auto'
+  if (t === 'hidden' && leftSide) style.marginRight = 'auto'
+  return style
+})
+const accentHex = computed(() =>
+  toHex(standOut(runtime.coverColor || '#8a8f9c', glassTint.value)),
+)
+
+/**
+ * 控件底色。默认是固定的暗色块；开启跟随取色时用封面色，
+ * 先压暗一档（按钮是"底"，不能比上面的图标还亮），再确保和词板背景分得开。
+ */
+const mediaBtnBg = computed(() => {
+  if (!settings.media.tint) return 'rgba(0, 0, 0, 0.30)'
+  const raw = runtime.coverColor || '#8a8f9c'
+  const dark = rgbOf(raw).map((v) => Math.round(v * 0.7)) as [number, number, number]
+  const [r, g, b] = standOut(toHex(dark), glassTint.value, 0.16)
+  return `rgba(${r}, ${g}, ${b}, 0.66)`
+})
+
+/** 进度条颜色：不开取色就是白色（不可手改） */
+const progressColor = computed(() => (settings.media.barTint ? accentHex.value : '#ffffff'))
+
 async function toggleLock() {
   if (isTauri) {
     const { toggleLocked } = await import('../core/bridge')
@@ -185,31 +249,33 @@ const effectiveText = computed(() => {
   return mediaOn.value && t === 'center' ? 'left' : t
 })
 
-/** 按钮组在文本反侧：文本左 -> 控件右；文本右 -> 控件左 */
-const mediaStyle = computed(() => {
-  const right = effectiveText.value !== 'right'
-  return {
-    order: right ? '2' : '-1',
-    marginLeft: right ? 'auto' : '0',
-  }
+/**
+ * 按钮组在文本的反侧：文本左 -> 控件右；文本右 -> 控件左。
+ *
+ * 但**封面永远占最外侧**（最左或最右），控件只能排在封面内侧：
+ * - 封面在左、控件也在左 -> 封面 0、控件 1（不能把控件排到 0，否则封面被挤到里面）
+ * - 封面在右、控件在右 -> 控件 3、封面 4
+ * 文本隐藏时按封面反侧摆控件，省得和封面抢同一侧。
+ */
+const mediaOrder = computed(() => {
+  const t = cardText.value
+  const leftSide = t === 'hidden' ? cardCover.value === 'right' : t === 'right'
+  if (leftSide) return cardCover.value === 'left' ? 1 : 0
+  return cardCover.value === 'right' ? 3 : 4
 })
 
-/** 信息栏顺序：在顶部 1、在底部 3（舞台固定 0） */
-const headOrder = computed(() => (cardPos.value === 'top' ? 1 : 3))
+/**
+ * 信息栏顺序：舞台固定 0，所以顶部必须是负数。
+ * 之前用 top=1 / bottom=3，结果"顶部"永远排到舞台后面 —— 只剩底部能用。
+ */
+const headOrder = computed(() => (cardPos.value === 'top' ? -2 : 2))
 
 /**
  * 进度条顺序。规则是「同侧时让到内侧，异侧时贴边」：
- * - 顶部 + 信息也在顶部 -> 2（信息下面）
- * - 顶部 + 信息在底部 -> -1（贴面板顶）
- * - 底部 + 信息在顶部 -> 5（贴面板底）
- * - 底部 + 信息也在底部 -> 2（信息上面）
+ * - 顶部：-1（信息栏在顶部时自然落在它下面，信息在底部时贴面板顶）
+ * - 底部：1（信息栏在底部时落在它上面，信息在顶部时贴面板底）
  */
-const barOrder = computed(() => {
-  const top = settings.media.bar === 'top'
-  const headTop = cardPos.value === 'top'
-  if (top) return headTop ? 2 : -1
-  return headTop ? 5 : 2
-})
+const barOrder = computed(() => (settings.media.bar === 'top' ? -1 : 1))
 
 /**
  * 把控件的实际位置报给 Rust。
@@ -306,7 +372,12 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
           <div class="title">{{ runtime.trackTitle || '未在播放' }}</div>
           <div class="artist">{{ runtime.trackArtist || '等待播放器' }}</div>
         </div>
-        <MediaBar v-if="mediaOn" class="media-slot" :style="mediaStyle" />
+        <MediaBar
+          v-if="mediaOn"
+          class="media-slot"
+          :style="mediaStyle"
+          :bg="mediaBtnBg"
+        />
       </div>
 
       <div class="stage-wrap">
@@ -316,7 +387,12 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
         </div>
       </div>
 
-      <MediaProgress v-if="mediaOn" class="mprogress" :style="{ order: barOrder }" />
+      <MediaProgress
+        v-if="mediaOn"
+        class="mprogress"
+        :style="{ order: barOrder }"
+        :color="progressColor"
+      />
     </div>
 
     <button
@@ -411,8 +487,9 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
 /* 信息栏在底部时，整块排到舞台后面去（顺序由 inline order 决定，这里不写死） */
 
 /* 封面在右：靠 order 排到最后，不用 row-reverse（反转会把控件的顺序也带着翻） */
+/* 封面永远占最外侧：最左 0 / 最右 4，控件只能排进内侧 */
 .card-head.cover-right .cover {
-  order: 3;
+  order: 4;
 }
 
 .card-head.cover-left .cover {
@@ -420,7 +497,7 @@ const lockOnTop = computed(() => cardHead.value && cardPos.value === 'bottom')
 }
 
 .card-head .meta {
-  order: 1;
+  order: 2;
 }
 
 .card-head {
